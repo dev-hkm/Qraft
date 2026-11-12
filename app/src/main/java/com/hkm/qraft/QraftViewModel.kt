@@ -113,6 +113,8 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
     val canUndo: StateFlow<Boolean> = _canUndo.asStateFlow()
     private val _canRedo = MutableStateFlow(false)
     val canRedo: StateFlow<Boolean> = _canRedo.asStateFlow()
+    private val _batchProgress = MutableStateFlow<Pair<Int, Int>?>(null)
+    val batchProgress: StateFlow<Pair<Int, Int>?> = _batchProgress.asStateFlow()
     private var lastHistoryKind: String? = null
     private var lastHistoryTimeMs: Long = 0L
 
@@ -625,18 +627,24 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
         lines: List<String>,
         saveToLibrary: Boolean,
         exportPngs: Boolean,
+        exportPdfSheetLayout: com.hkm.qraft.qr.PrintSheetLayout? = null,
         onComplete: () -> Unit
     ) {
         val design = _draft.value.design
         viewModelScope.launch {
             _isExporting.value = true
+            _batchProgress.value = 0 to lines.size
             var exportedCount = 0
             val batchItems = mutableListOf<QrCreationItem>()
+            val sheetItems = mutableListOf<com.hkm.qraft.qr.PrintSheetItem>()
             lines.forEachIndexed { idx, line ->
-                val isUrl = line.startsWith("http://") || line.startsWith("https://") || line.contains(".") && !line.contains(" ")
+                val isUrl = line.startsWith("http://") || line.startsWith("https://") ||
+                    (line.contains(".") && !line.contains(" "))
                 val type = if (isUrl) QrContentType.URL else QrContentType.TEXT
                 val fields = if (isUrl) QrPayloadFields(url = line) else QrPayloadFields(text = line)
-                val title = "Batch ${idx + 1} - ${QrPayloadEncoder.defaultTitle(type, fields)}"
+                val shortLabel = QrPayloadEncoder.defaultTitle(type, fields)
+                val title = "Batch ${idx + 1} - $shortLabel"
+                val encoded = QrPayloadEncoder.encode(type, fields)
 
                 if (saveToLibrary) {
                     batchItems += QrCreationItem(
@@ -648,27 +656,147 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
                         isVerifiedScannable = true
                     )
                 }
+                if (exportPdfSheetLayout != null) {
+                    sheetItems += com.hkm.qraft.qr.PrintSheetItem(
+                        title = shortLabel.take(24),
+                        payload = encoded,
+                        design = design
+                    )
+                }
                 if (exportPngs) {
                     val res = QrExporter.saveToDevice(
                         context = getApplication(),
                         title = title,
-                        data = QrPayloadEncoder.encode(type, fields),
+                        data = encoded,
                         design = design,
                         format = ExportImageFormat.PNG
                     )
                     if (res.success) exportedCount++
                 }
+                _batchProgress.value = (idx + 1) to lines.size
             }
             if (batchItems.isNotEmpty()) {
                 repository.saveItems(batchItems)
             }
+            var sheetSaved = false
+            if (exportPdfSheetLayout != null && sheetItems.isNotEmpty()) {
+                val res = QrExporter.savePrintSheetPdf(
+                    context = getApplication(),
+                    sheetTitle = "Qraft Batch Labels",
+                    items = sheetItems,
+                    layout = exportPdfSheetLayout
+                )
+                sheetSaved = res.success
+            }
+            _batchProgress.value = null
             _isExporting.value = false
             val summary = buildString {
                 append("Batch finished: ${lines.size} QR")
-                if (exportPngs) append(" • $exportedCount ${design.exportSizePx}px PNGs saved")
+                if (exportPngs) append(" • $exportedCount PNGs saved")
+                if (sheetSaved && exportPdfSheetLayout != null) append(" • ${exportPdfSheetLayout.label} PDF saved")
             }
             _statusBanner.tryEmit(summary)
             onComplete()
+        }
+    }
+
+    fun exportSinglePrintSheet(
+        title: String,
+        data: String,
+        design: QrDesignSpec,
+        layout: com.hkm.qraft.qr.PrintSheetLayout,
+        asPdf: Boolean
+    ) {
+        viewModelScope.launch {
+            _isExporting.value = true
+            val tiled = com.hkm.qraft.qr.PrintSheetEngine.tileSingleQr(title, data, design, layout)
+            val result = if (asPdf) {
+                QrExporter.savePrintSheetPdf(getApplication(), title, tiled, layout)
+            } else {
+                QrExporter.savePrintSheetPng(getApplication(), title, tiled, layout)
+            }
+            _isExporting.value = false
+            _statusBanner.tryEmit(result.message)
+        }
+    }
+
+    fun exportLibraryPrintSheet(
+        items: List<QrCreationItem>,
+        layout: com.hkm.qraft.qr.PrintSheetLayout,
+        asPdf: Boolean
+    ) {
+        if (items.isEmpty()) return
+        viewModelScope.launch {
+            _isExporting.value = true
+            val sheetItems = items.map { item ->
+                com.hkm.qraft.qr.PrintSheetItem(
+                    title = item.title,
+                    payload = QrPayloadEncoder.encode(item.type, item.payload),
+                    design = item.design
+                )
+            }
+            val result = if (asPdf) {
+                QrExporter.savePrintSheetPdf(getApplication(), "Qraft Library Sheet", sheetItems, layout)
+            } else {
+                QrExporter.savePrintSheetPng(getApplication(), "Qraft Library Sheet", sheetItems, layout)
+            }
+            _isExporting.value = false
+            _statusBanner.tryEmit(result.message)
+        }
+    }
+
+    fun bulkSetFavorite(ids: Set<String>, favorite: Boolean) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            repository.setFavoriteForItems(ids, favorite)
+            _statusBanner.tryEmit(
+                if (favorite) "Pinned ${ids.size} QR codes" else "Unpinned ${ids.size} QR codes"
+            )
+        }
+    }
+
+    fun bulkDeleteItems(ids: Set<String>) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            repository.deleteItems(ids)
+            _statusBanner.tryEmit("Deleted ${ids.size} QR codes")
+        }
+    }
+
+    fun exportBackupToUri(uri: Uri) {
+        viewModelScope.launch {
+            val items = savedItems.value
+            val presets = customPresets.value
+            val json = withContext(Dispatchers.Default) {
+                com.hkm.qraft.data.QraftBackupManager.serialize(items, presets)
+            }
+            val ok = QrExporter.writeTextToUri(getApplication(), uri, json)
+            _statusBanner.tryEmit(
+                if (ok) "Exported ${items.size} QR codes & ${presets.size} presets (.qraft)"
+                else "Could not export backup file"
+            )
+        }
+    }
+
+    fun importBackupFromUri(uri: Uri) {
+        viewModelScope.launch {
+            val raw = QrExporter.readTextFromUri(getApplication(), uri)
+            val parsed = withContext(Dispatchers.Default) {
+                raw?.let { com.hkm.qraft.data.QraftBackupManager.deserialize(it) }
+            }
+            if (parsed == null) {
+                _statusBanner.tryEmit("Invalid or unreadable .qraft backup file")
+                return@launch
+            }
+            if (parsed.items.isNotEmpty()) {
+                repository.saveItems(parsed.items)
+            }
+            if (parsed.customPresets.isNotEmpty()) {
+                repository.saveCustomPresets(parsed.customPresets)
+            }
+            _statusBanner.tryEmit(
+                "Restored ${parsed.items.size} QR codes & ${parsed.customPresets.size} presets"
+            )
         }
     }
 

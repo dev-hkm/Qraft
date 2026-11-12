@@ -127,19 +127,42 @@ class QraftRepository(private val context: Context) {
     }
 
     suspend fun deleteItem(id: String) {
+        deleteItems(setOf(id))
+    }
+
+    suspend fun deleteItems(ids: Set<String>) {
+        if (ids.isEmpty()) return
         context.qraftDataStore.edit { prefs ->
             val current = decodeItems(prefs[Keys.ITEMS_JSON], prefs[Keys.SEEDED] == true)
-                .filterNot { it.id == id }
+                .filterNot { it.id in ids }
+            prefs[Keys.SEEDED] = true
+            prefs[Keys.ITEMS_JSON] = gson.toJson(current)
+        }
+    }
+
+    suspend fun setFavoriteForItems(ids: Set<String>, favorite: Boolean) {
+        if (ids.isEmpty()) return
+        context.qraftDataStore.edit { prefs ->
+            val current = decodeItems(prefs[Keys.ITEMS_JSON], prefs[Keys.SEEDED] == true).map {
+                if (it.id in ids) it.copy(isFavorite = favorite) else it
+            }
             prefs[Keys.SEEDED] = true
             prefs[Keys.ITEMS_JSON] = gson.toJson(current)
         }
     }
 
     suspend fun saveCustomPreset(preset: SavedStylePreset) {
+        saveCustomPresets(listOf(preset))
+    }
+
+    suspend fun saveCustomPresets(presets: List<SavedStylePreset>) {
+        if (presets.isEmpty()) return
         context.qraftDataStore.edit { prefs ->
             val current = decodePresets(prefs[Keys.PRESETS_JSON]).toMutableList()
-            current.removeAll { it.id == preset.id }
-            current.add(0, preset.copy(isBuiltIn = false))
+            presets.asReversed().forEach { preset ->
+                current.removeAll { it.id == preset.id }
+                current.add(0, preset.copy(isBuiltIn = false))
+            }
             prefs[Keys.PRESETS_JSON] = gson.toJson(current)
         }
     }

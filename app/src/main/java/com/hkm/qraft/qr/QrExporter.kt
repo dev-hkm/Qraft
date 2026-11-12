@@ -196,6 +196,93 @@ object QrExporter {
         }
     }
 
+    suspend fun savePrintSheetPdf(
+        context: Context,
+        sheetTitle: String,
+        items: List<PrintSheetItem>,
+        layout: PrintSheetLayout
+    ): ExportResult = withContext(Dispatchers.IO) {
+        runCatching {
+            val clean = sanitizeFilename(sheetTitle)
+            val fileName = "${clean}_${layout.cols}x${layout.rows}_${System.currentTimeMillis()}.pdf"
+            val pdfBytes = PrintSheetEngine.renderPrintSheetPdfBytes(context, items, layout, sheetTitle)
+            val uri = saveDocumentBytes(context, pdfBytes, fileName, ExportImageFormat.PDF.mimeType)
+            ExportResult(
+                success = uri != null,
+                message = if (uri != null) {
+                    "Saved ${layout.label} PDF sheet (${items.size} labels) to Documents/Qraft"
+                } else {
+                    "Could not save print sheet PDF"
+                },
+                uri = uri
+            )
+        }.getOrElse { err ->
+            ExportResult(false, "Print sheet failed: ${err.localizedMessage ?: "unknown error"}")
+        }
+    }
+
+    suspend fun savePrintSheetPng(
+        context: Context,
+        sheetTitle: String,
+        items: List<PrintSheetItem>,
+        layout: PrintSheetLayout
+    ): ExportResult = withContext(Dispatchers.IO) {
+        runCatching {
+            val clean = sanitizeFilename(sheetTitle)
+            val fileName = "${clean}_${layout.cols}x${layout.rows}_${System.currentTimeMillis()}.png"
+            val pageCount = ((items.size + (layout.cols * layout.rows) - 1) / (layout.cols * layout.rows)).coerceAtLeast(1)
+            val bitmap = PrintSheetEngine.renderPrintSheetPageBitmap(
+                context = context,
+                items = items,
+                layout = layout,
+                pageIndex = 0,
+                totalPages = pageCount,
+                sheetTitle = sheetTitle
+            )
+            val uri = try {
+                saveBitmapToGallery(context, bitmap, fileName, ExportImageFormat.PNG)
+            } finally {
+                bitmap.recycle()
+            }
+            ExportResult(
+                success = uri != null,
+                message = if (uri != null) {
+                    "Saved 300 DPI ${layout.label} PNG sheet to Pictures/Qraft"
+                } else {
+                    "Could not save print sheet PNG"
+                },
+                uri = uri
+            )
+        }.getOrElse { err ->
+            ExportResult(false, "Print sheet failed: ${err.localizedMessage ?: "unknown error"}")
+        }
+    }
+
+    suspend fun writeTextToUri(
+        context: Context,
+        uri: Uri,
+        text: String
+    ): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            context.contentResolver.openOutputStream(uri)?.use { os ->
+                os.write(text.toByteArray(Charsets.UTF_8))
+                os.flush()
+            } ?: return@runCatching false
+            true
+        }.getOrDefault(false)
+    }
+
+    suspend fun readTextFromUri(
+        context: Context,
+        uri: Uri
+    ): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                input.bufferedReader(Charsets.UTF_8).readText()
+            }
+        }.getOrNull()
+    }
+
     fun renderPdfBytes(
         context: Context,
         title: String,

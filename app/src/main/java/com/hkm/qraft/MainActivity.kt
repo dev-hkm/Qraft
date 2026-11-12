@@ -114,8 +114,25 @@ fun QraftAppRoot(
     val scannability by viewModel.scannability.collectAsStateWithLifecycle()
     val isVerifying by viewModel.isVerifying.collectAsStateWithLifecycle()
     val isExporting by viewModel.isExporting.collectAsStateWithLifecycle()
+    val batchProgress by viewModel.batchProgress.collectAsStateWithLifecycle()
     val canUndo by viewModel.canUndo.collectAsStateWithLifecycle()
     val canRedo by viewModel.canRedo.collectAsStateWithLifecycle()
+
+    val backupExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) {
+            viewModel.exportBackupToUri(uri)
+        }
+    }
+
+    val backupImportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.importBackupFromUri(uri)
+        }
+    }
 
     val qrImportPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -231,7 +248,10 @@ fun QraftAppRoot(
                     },
                     onOpenBatch = { showBatchSheet = true },
                     onCreateNew = { showCreatePicker = true },
-                    onImportQr = launchQrImport
+                    onImportQr = launchQrImport,
+                    onBulkFavorite = viewModel::bulkSetFavorite,
+                    onBulkDelete = viewModel::bulkDeleteItems,
+                    onExportPrintSheet = viewModel::exportLibraryPrintSheet
                 )
             }
 
@@ -332,7 +352,16 @@ fun QraftAppRoot(
             onSave = viewModel::saveExport,
             onShare = viewModel::shareExport,
             onCopyImage = viewModel::copyExportImage,
-            onCopyPayload = viewModel::copyPayload
+            onCopyPayload = viewModel::copyPayload,
+            onExportPrintSheet = { layout, asPdf ->
+                viewModel.exportSinglePrintSheet(
+                    title = draft.effectiveTitle,
+                    data = draft.encodedPayload,
+                    design = draft.design,
+                    layout = layout,
+                    asPdf = asPdf
+                )
+            }
         )
     }
 
@@ -340,9 +369,10 @@ fun QraftAppRoot(
         BatchGeneratorSheet(
             currentDesign = draft.design,
             isRunning = isExporting,
+            batchProgress = batchProgress,
             onDismiss = { showBatchSheet = false },
-            onRunBatch = { lines, saveToLib, exportPngs ->
-                viewModel.runBatchGenerate(lines, saveToLib, exportPngs) {
+            onRunBatch = { lines, saveToLib, exportPngs, exportPdfLayout ->
+                viewModel.runBatchGenerate(lines, saveToLib, exportPngs, exportPdfLayout) {
                     showBatchSheet = false
                 }
             }
@@ -357,7 +387,13 @@ fun QraftAppRoot(
             onCreatorNameChange = viewModel::setCreatorName,
             onAutoVerifyChange = viewModel::setAutoVerify,
             onDefaultFormatChange = viewModel::setDefaultExportFormat,
-            onDefaultResolutionChange = viewModel::setDefaultExportResolution
+            onDefaultResolutionChange = viewModel::setDefaultExportResolution,
+            onExportBackup = {
+                backupExportLauncher.launch("qraft_backup_v4.qraft")
+            },
+            onImportBackup = {
+                backupImportLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+            }
         )
     }
 

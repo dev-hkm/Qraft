@@ -8,12 +8,18 @@ import android.graphics.Paint
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.hkm.qraft.data.PresetCatalog
+import com.hkm.qraft.data.QraftBackupManager
 import com.hkm.qraft.model.*
+import com.hkm.qraft.qr.BatchSequenceExpander
 import com.hkm.qraft.qr.PaletteExtractor
+import com.hkm.qraft.qr.PrintSheetEngine
+import com.hkm.qraft.qr.PrintSheetItem
+import com.hkm.qraft.qr.PrintSheetLayout
 import com.hkm.qraft.qr.QrCodeImporter
 import com.hkm.qraft.qr.QrEngine
 import com.hkm.qraft.qr.QrExporter
 import com.hkm.qraft.qr.QrPayloadEncoder
+import com.hkm.qraft.qr.QrPdfWriter
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -239,6 +245,78 @@ class QraftVerificationTest {
 
         vm.redoDesignEdit()
         assertEquals(QrPixelStyle.HEXAGON, vm.draft.value.design.pixelStyle)
+    }
+
+    @Test
+    fun printSheetEngineComposes300DpiA4AndMultiPagePdf() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val sequence = BatchSequenceExpander.expandSequence(
+            prefix = "https://qraft.studio/t-",
+            suffix = "",
+            start = 1,
+            end = 14,
+            zeroPad = 2
+        )
+        assertEquals(14, sequence.size)
+        assertEquals("https://qraft.studio/t-01", sequence.first())
+        assertEquals("https://qraft.studio/t-14", sequence.last())
+
+        val csvLines = BatchSequenceExpander.parseImportedLines(
+            "url,note\n\"https://a.example\",Table 1\nhttps://b.example,Table 2\n"
+        )
+        assertEquals(listOf("https://a.example", "https://b.example"), csvLines)
+
+        val defaultDesign = PresetCatalog.builtInPresets.first().design
+        val sheetItems = sequence.mapIndexed { idx, url ->
+            PrintSheetItem(title = "Table ${idx + 1}", payload = url, design = defaultDesign)
+        }
+        val page1 = PrintSheetEngine.renderPrintSheetPageBitmap(
+            context = context,
+            items = sheetItems,
+            layout = PrintSheetLayout.STICKERS_3X4,
+            pageIndex = 0,
+            totalPages = 2,
+            sheetTitle = "Qraft Batch Labels"
+        )
+        assertEquals(QrPdfWriter.A4_WIDTH_PX, page1.width)
+        assertEquals(QrPdfWriter.A4_HEIGHT_PX, page1.height)
+        page1.recycle()
+
+        val pdfBytes = PrintSheetEngine.renderPrintSheetPdfBytes(
+            context = context,
+            items = sheetItems,
+            layout = PrintSheetLayout.STICKERS_3X4,
+            sheetTitle = "Qraft MultiPage Print"
+        )
+        val asciiHeader = String(pdfBytes.take(400).toByteArray(), Charsets.ISO_8859_1)
+        assertTrue(asciiHeader.startsWith("%PDF-"))
+        assertTrue(asciiHeader.contains("/Count 2"))
+    }
+
+    @Test
+    fun backupManagerRoundtripsItemsAndPresetsJson() {
+        val starter = PresetCatalog.starterItems(now = 1700000000000L)
+        val customPreset = SavedStylePreset(
+            id = "custom_brand_v4",
+            name = "Brand Slate",
+            subtitle = "Custom test preset",
+            design = PresetCatalog.builtInPresets.last().design,
+            isBuiltIn = false
+        )
+        val json = QraftBackupManager.serialize(
+            items = starter,
+            customPresets = listOf(customPreset),
+            appVersion = "4.0.0"
+        )
+        assertTrue(json.contains("custom_brand_v4"))
+
+        val restored = QraftBackupManager.deserialize(json)
+        assertNotNull(restored)
+        assertEquals(starter.size, restored!!.items.size)
+        assertEquals(starter.first().id, restored.items.first().id)
+        assertEquals(1, restored.customPresets.size)
+        assertEquals("Brand Slate", restored.customPresets.first().name)
+        assertNull(QraftBackupManager.deserialize("not valid json"))
     }
 
     @Test
