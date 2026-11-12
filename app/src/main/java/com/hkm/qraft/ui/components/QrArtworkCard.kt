@@ -103,6 +103,16 @@ fun QrArtworkPreview(
             ),
             shape = RoundedCornerShape(frameCorner)
         )
+        frame.style == OuterFrameStyle.GLASS_CARD -> Modifier.border(
+            width = 1.5.dp,
+            brush = Brush.linearGradient(
+                listOf(
+                    Color.White.copy(alpha = 0.78f),
+                    Color(frame.accentColor).copy(alpha = 0.34f)
+                )
+            ),
+            shape = RoundedCornerShape(frameCorner)
+        )
         frame.borderThicknessDp > 0f && frame.style != OuterFrameStyle.NONE -> Modifier.border(
             width = frame.borderThicknessDp.dp,
             color = Color(frame.accentColor),
@@ -129,7 +139,11 @@ fun QrArtworkPreview(
         } else {
             Surface(
                 shape = RoundedCornerShape(frameCorner),
-                color = Color(frame.frameFillColor),
+                color = if (frame.style == OuterFrameStyle.GLASS_CARD) {
+                    Color(frame.frameFillColor).copy(alpha = 0.88f)
+                } else {
+                    Color(frame.frameFillColor)
+                },
                 shadowElevation = if (QraftThemeTokens.colors.isDark) 4.dp else 10.dp,
                 modifier = Modifier
                     .then(frameBorderModifier)
@@ -139,7 +153,10 @@ fun QrArtworkPreview(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.padding(
                         horizontal = 16.dp,
-                        vertical = if (frame.style == OuterFrameStyle.CLEAN_CARD || frame.style == OuterFrameStyle.GRADIENT_BORDER) 16.dp else 14.dp
+                        vertical = if (
+                            frame.style == OuterFrameStyle.CLEAN_CARD ||
+                            frame.style == OuterFrameStyle.GRADIENT_BORDER
+                        ) 16.dp else 14.dp
                     )
                 ) {
                     if (frame.style == OuterFrameStyle.TOP_BADGE_CARD || frame.style == OuterFrameStyle.DOUBLE_PILL) {
@@ -162,20 +179,48 @@ fun QrArtworkPreview(
                         }
                     }
 
-                    QrCoreBox(
-                        qrPainter = qrPainter,
-                        design = design,
-                        bgPhotoBitmap = bgPhotoBitmap,
-                        size = qrViewportSize,
-                        cornerRadius = (frameCorner - 8.dp).coerceAtLeast(10.dp),
-                        showCheckerboard = showCheckerboardForTransparent
-                    )
+                    Box(contentAlignment = Alignment.Center) {
+                        QrCoreBox(
+                            qrPainter = qrPainter,
+                            design = design,
+                            bgPhotoBitmap = bgPhotoBitmap,
+                            size = qrViewportSize,
+                            cornerRadius = (frameCorner - 8.dp).coerceAtLeast(10.dp),
+                            showCheckerboard = showCheckerboardForTransparent
+                        )
+                        if (frame.style == OuterFrameStyle.CORNER_BRACKET) {
+                            Canvas(modifier = Modifier.size(qrViewportSize + 10.dp)) {
+                                val sw = 3.5.dp.toPx()
+                                val leg = 20.dp.toPx()
+                                val c = Color(frame.accentColor)
+                                val r = size.width
+                                val b = size.height
+                                val p = androidx.compose.ui.graphics.Path().apply {
+                                    moveTo(0f, leg); lineTo(0f, 0f); lineTo(leg, 0f)
+                                    moveTo(r - leg, 0f); lineTo(r, 0f); lineTo(r, leg)
+                                    moveTo(0f, b - leg); lineTo(0f, b); lineTo(leg, b)
+                                    moveTo(r - leg, b); lineTo(r, b); lineTo(r, b - leg)
+                                }
+                                drawPath(
+                                    path = p,
+                                    color = c,
+                                    style = Stroke(
+                                        width = sw,
+                                        cap = StrokeCap.Round,
+                                        join = androidx.compose.ui.graphics.StrokeJoin.Round
+                                    )
+                                )
+                            }
+                        }
+                    }
 
                     when (frame.style) {
                         OuterFrameStyle.BOTTOM_SCAN_BANNER,
                         OuterFrameStyle.SPEECH_BUBBLE,
                         OuterFrameStyle.WARM_POSTER,
-                        OuterFrameStyle.DOUBLE_PILL -> {
+                        OuterFrameStyle.DOUBLE_PILL,
+                        OuterFrameStyle.GLASS_CARD,
+                        OuterFrameStyle.CORNER_BRACKET -> {
                             Spacer(Modifier.height(12.dp))
                             Box(
                                 modifier = Modifier
@@ -266,9 +311,15 @@ private fun QrCoreBox(
     showCheckerboard: Boolean
 ) {
     val quietPad = (size * design.quietZonePadding.coerceIn(0f, 0.24f))
+    val shadowModifier = if (design.matrixShadowEnabled) {
+        Modifier.shadow(elevation = 14.dp, shape = RoundedCornerShape(cornerRadius), clip = false)
+    } else {
+        Modifier
+    }
     Box(
         modifier = Modifier
             .size(size)
+            .then(shadowModifier)
             .clip(RoundedCornerShape(cornerRadius)),
         contentAlignment = Alignment.Center
     ) {

@@ -34,7 +34,8 @@ import com.hkm.qraft.ui.theme.appleBounceClick
 @Composable
 fun CreateQrTypeSheet(
     onDismiss: () -> Unit,
-    onSelectType: (QrContentType) -> Unit
+    onSelectType: (QrContentType) -> Unit,
+    onImportQrImage: (() -> Unit)? = null
 ) {
     val colors = QraftThemeTokens.colors
     ModalBottomSheet(
@@ -55,7 +56,7 @@ fun CreateQrTypeSheet(
                 color = colors.textPrimary
             )
             Text(
-                text = "Pick a payload format to open Qraft Studio",
+                text = "Pick a payload format or remix an existing QR image",
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textSecondary
             )
@@ -64,6 +65,57 @@ fun CreateQrTypeSheet(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.heightIn(max = 460.dp)
             ) {
+                if (onImportQrImage != null) {
+                    item {
+                        Surface(
+                            shape = RoundedCornerShape(18.dp),
+                            color = colors.heroBannerBg,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .appleBounceClick {
+                                    onDismiss()
+                                    onImportQrImage()
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(42.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(colors.espressoAccent),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.QrCodeScanner,
+                                        contentDescription = null,
+                                        tint = colors.espressoAccentContent
+                                    )
+                                }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        "Import & Remix Existing QR",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = colors.heroBannerTitle
+                                    )
+                                    Text(
+                                        "Decode a QR photo from Gallery to edit or restyle",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = colors.heroBannerBody
+                                    )
+                                }
+                                Icon(
+                                    Icons.Rounded.ChevronRight,
+                                    contentDescription = null,
+                                    tint = colors.heroBannerTitle
+                                )
+                            }
+                        }
+                    }
+                }
                 item {
                     FlowGrid(items = QrContentType.entries, columns = 2) { type ->
                         val pastel = colors.pastelAt(type.pastelIndex)

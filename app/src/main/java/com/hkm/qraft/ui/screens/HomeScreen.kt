@@ -83,7 +83,8 @@ fun HomeScreen(
     onToggleFavorite: (String) -> Unit,
     onOpenLibrary: () -> Unit,
     onOpenBatch: () -> Unit,
-    onOpenCreatePicker: () -> Unit
+    onOpenCreatePicker: () -> Unit,
+    onImportQr: () -> Unit = {}
 ) {
     val colors = QraftThemeTokens.colors
     val filteredItems = remember(items, selectedCategory) {
@@ -365,9 +366,19 @@ fun HomeScreen(
                             color = colors.textPrimary
                         )
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            Text(
+                                text = "Remix",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = colors.espressoAccent,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(colors.heroBannerBg)
+                                    .appleBounceClick { onImportQr() }
+                                    .padding(horizontal = 11.dp, vertical = 5.dp)
+                            )
                             Text(
                                 text = "Batch",
                                 style = MaterialTheme.typography.labelLarge,
@@ -376,7 +387,7 @@ fun HomeScreen(
                                     .clip(RoundedCornerShape(50))
                                     .background(colors.surfaceMuted)
                                     .appleBounceClick { onOpenBatch() }
-                                    .padding(horizontal = 12.dp, vertical = 5.dp)
+                                    .padding(horizontal = 11.dp, vertical = 5.dp)
                             )
                             Text(
                                 text = "See all",

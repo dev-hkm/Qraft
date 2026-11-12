@@ -24,7 +24,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -35,6 +37,8 @@ import com.hkm.qraft.qr.LogoCatalog
 import com.hkm.qraft.qr.QrEngine
 import com.hkm.qraft.ui.theme.QraftThemeTokens
 import com.hkm.qraft.ui.theme.appleBounceClick
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 @Composable
@@ -129,6 +133,16 @@ fun PresetsEditorTab(
     }
 }
 
+private object MiniQrThumbnailCache {
+    private val cache = android.util.LruCache<String, android.graphics.Bitmap>(32)
+    fun get(key: String): android.graphics.Bitmap? = cache.get(key)
+    fun put(key: String, bitmap: android.graphics.Bitmap) {
+        if (cache.get(key) == null) {
+            cache.put(key, bitmap)
+        }
+    }
+}
+
 @Composable
 private fun PresetRowCard(
     preset: SavedStylePreset,
@@ -137,6 +151,33 @@ private fun PresetRowCard(
     onDelete: (() -> Unit)?
 ) {
     val colors = QraftThemeTokens.colors
+    val context = LocalContext.current
+    val thumbnail by produceState<android.graphics.Bitmap?>(
+        initialValue = MiniQrThumbnailCache.get(preset.id),
+        key1 = preset.id
+    ) {
+        if (value == null) {
+            value = withContext(Dispatchers.Default) {
+                val safeDesign = if (preset.design.background.mode == BackgroundMode.TRANSPARENT) {
+                    preset.design.copy(
+                        background = preset.design.background.copy(
+                            mode = BackgroundMode.SOLID,
+                            brush = BrushStyleConfig(mode = BrushMode.SOLID, primaryColor = 0xFFFFFFFF)
+                        )
+                    )
+                } else {
+                    preset.design
+                }
+                QrEngine.renderQrCoreBitmap(
+                    context = context,
+                    data = "https://qraft.studio",
+                    design = safeDesign.copy(quietZonePadding = 0.06f),
+                    sizePx = 136
+                ).also { MiniQrThumbnailCache.put(preset.id, it) }
+            }
+        }
+    }
+
     Surface(
         shape = RoundedCornerShape(20.dp),
         color = colors.surface,
@@ -153,26 +194,29 @@ private fun PresetRowCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Color + Shape preview badge
             Box(
                 modifier = Modifier
-                    .size(48.dp)
+                    .size(54.dp)
                     .clip(RoundedCornerShape(14.dp))
                     .background(Color(preset.design.background.brush.primaryColor))
                     .border(1.dp, colors.cardBorder, RoundedCornerShape(14.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                Canvas(modifier = Modifier.size(30.dp)) {
-                    val brush = QrEngine.buildComposeBrush(preset.design.darkBrush, size.minDimension)
-                    val eyeColor = if (preset.design.customEyeBallColors) {
-                        Color(preset.design.eyeBallBrush.primaryColor)
-                    } else {
-                        Color(preset.design.darkBrush.primaryColor)
+                val bmp = thumbnail
+                if (bmp != null) {
+                    androidx.compose.foundation.Image(
+                        bitmap = bmp.asImageBitmap(),
+                        contentDescription = "${preset.name} live QR preview",
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Canvas(modifier = Modifier.size(30.dp)) {
+                        val brush = QrEngine.buildComposeBrush(preset.design.darkBrush, size.minDimension)
+                        drawCircle(brush = brush, radius = size.minDimension * 0.24f, center = Offset(size.width * 0.30f, size.height * 0.30f))
+                        drawCircle(brush = brush, radius = size.minDimension * 0.24f, center = Offset(size.width * 0.72f, size.height * 0.30f))
+                        drawCircle(brush = brush, radius = size.minDimension * 0.24f, center = Offset(size.width * 0.30f, size.height * 0.72f))
                     }
-                    drawCircle(brush = brush, radius = size.minDimension * 0.24f, center = Offset(size.width * 0.30f, size.height * 0.30f))
-                    drawCircle(brush = brush, radius = size.minDimension * 0.24f, center = Offset(size.width * 0.72f, size.height * 0.30f))
-                    drawCircle(brush = brush, radius = size.minDimension * 0.24f, center = Offset(size.width * 0.30f, size.height * 0.72f))
-                    drawCircle(color = eyeColor, radius = size.minDimension * 0.22f, center = Offset(size.width * 0.72f, size.height * 0.72f))
                 }
             }
 
@@ -354,7 +398,8 @@ private enum class ColorTarget(val label: String) {
 fun ColorsEditorTab(
     design: QrDesignSpec,
     onDesignChange: (QrDesignSpec) -> Unit,
-    onPickBackgroundPhoto: ((Uri) -> Unit)? = null
+    onPickBackgroundPhoto: ((Uri) -> Unit)? = null,
+    onExtractColorsFromPhoto: (() -> Unit)? = null
 ) {
     val colors = QraftThemeTokens.colors
     var target by remember { mutableStateOf(ColorTarget.PIXELS) }
@@ -537,6 +582,21 @@ fun ColorsEditorTab(
                             Icon(Icons.Rounded.Image, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
                             Text(if (design.background.photoUri == null) "Choose Background Photo" else "Change Background Photo")
+                        }
+                        if (!design.background.photoUri.isNullOrBlank() && onExtractColorsFromPhoto != null) {
+                            FilledTonalButton(
+                                onClick = onExtractColorsFromPhoto,
+                                shape = RoundedCornerShape(50),
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = colors.surfaceMuted,
+                                    contentColor = colors.textPrimary
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Rounded.AutoFixHigh, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("Extract Brand Colors from Photo")
+                            }
                         }
                         ColorSwatchRow(
                             label = "Scrim Tint Color",
@@ -727,7 +787,8 @@ private fun BrushEditorCard(
 fun LogoEditorTab(
     design: QrDesignSpec,
     onDesignChange: (QrDesignSpec) -> Unit,
-    onPickLogoPhoto: ((Uri) -> Unit)? = null
+    onPickLogoPhoto: ((Uri) -> Unit)? = null,
+    onExtractColorsFromLogo: (() -> Unit)? = null
 ) {
     val colors = QraftThemeTokens.colors
     val logo = design.logo
@@ -801,6 +862,21 @@ fun LogoEditorTab(
                     Icon(Icons.Rounded.AddPhotoAlternate, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Text(if (logo.galleryUri == null) "Pick Image from Gallery" else "Replace Logo Image")
+                }
+                if (!logo.galleryUri.isNullOrBlank() && onExtractColorsFromLogo != null) {
+                    FilledTonalButton(
+                        onClick = onExtractColorsFromLogo,
+                        shape = RoundedCornerShape(50),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = colors.surfaceMuted,
+                            contentColor = colors.textPrimary
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Rounded.AutoFixHigh, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Extract Brand Colors from Logo")
+                    }
                 }
             }
 
@@ -1005,7 +1081,9 @@ fun FrameAndProTab(
                 OuterFrameStyle.SPEECH_BUBBLE,
                 OuterFrameStyle.POLAROID_STAMP,
                 OuterFrameStyle.DOUBLE_PILL,
-                OuterFrameStyle.WARM_POSTER
+                OuterFrameStyle.WARM_POSTER,
+                OuterFrameStyle.GLASS_CARD,
+                OuterFrameStyle.CORNER_BRACKET
             )
             if (hasLabel) {
                 QraftTextField(
@@ -1119,6 +1197,13 @@ fun FrameAndProTab(
             value = design.quietZonePadding,
             valueRange = 0f..0.24f,
             onValueChange = { onDesignChange(design.copy(quietZonePadding = it)) }
+        )
+
+        ToggleRow(
+            title = "Soft QR Elevation Shadow",
+            subtitle = "Adds subtle depth behind the matrix inside card frames",
+            checked = design.matrixShadowEnabled,
+            onCheckedChange = { onDesignChange(design.copy(matrixShadowEnabled = it)) }
         )
 
         SectionLabel("Raster Export Resolution")

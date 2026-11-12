@@ -107,6 +107,114 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
         _selectedHomeCategory.value = type
     }
 
+    private val undoStack = ArrayDeque<StudioDraftState>()
+    private val redoStack = ArrayDeque<StudioDraftState>()
+    private val _canUndo = MutableStateFlow(false)
+    val canUndo: StateFlow<Boolean> = _canUndo.asStateFlow()
+    private val _canRedo = MutableStateFlow(false)
+    val canRedo: StateFlow<Boolean> = _canRedo.asStateFlow()
+    private var lastHistoryKind: String? = null
+    private var lastHistoryTimeMs: Long = 0L
+
+    private fun syncUndoFlags() {
+        _canUndo.value = undoStack.isNotEmpty()
+        _canRedo.value = redoStack.isNotEmpty()
+    }
+
+    private fun clearHistory() {
+        undoStack.clear()
+        redoStack.clear()
+        lastHistoryKind = null
+        lastHistoryTimeMs = 0L
+        syncUndoFlags()
+    }
+
+    private fun updateDraftWithHistory(
+        commitKind: String,
+        coalesceWindowMs: Long = 0L,
+        transform: (StudioDraftState) -> StudioDraftState
+    ) {
+        val prev = _draft.value
+        val next = transform(prev)
+        if (next == prev) return
+        val now = System.currentTimeMillis()
+        val shouldPush = undoStack.isEmpty() ||
+            coalesceWindowMs <= 0L ||
+            commitKind != lastHistoryKind ||
+            (now - lastHistoryTimeMs) > coalesceWindowMs
+        if (shouldPush) {
+            if (undoStack.size >= 30) {
+                undoStack.removeFirst()
+            }
+            undoStack.addLast(prev)
+            lastHistoryKind = commitKind
+            lastHistoryTimeMs = now
+        }
+        redoStack.clear()
+        _draft.value = next
+        syncUndoFlags()
+    }
+
+    private fun isContinuousDesignTweak(a: QrDesignSpec, b: QrDesignSpec): Boolean {
+        val discreteUnchanged = a.pixelStyle == b.pixelStyle &&
+            a.eyeFrameStyle == b.eyeFrameStyle &&
+            a.eyeBallStyle == b.eyeBallStyle &&
+            a.lightPixelStyle == b.lightPixelStyle &&
+            a.lightPixelColor == b.lightPixelColor &&
+            a.codeSilhouette == b.codeSilhouette &&
+            a.fourthEyeEnabled == b.fourthEyeEnabled &&
+            a.darkBrush == b.darkBrush &&
+            a.customEyeFrameColors == b.customEyeFrameColors &&
+            a.eyeFrameBrush == b.eyeFrameBrush &&
+            a.customEyeBallColors == b.customEyeBallColors &&
+            a.eyeBallBrush == b.eyeBallBrush &&
+            a.background.mode == b.background.mode &&
+            a.background.brush == b.background.brush &&
+            a.background.photoUri == b.background.photoUri &&
+            a.background.photoOverlayColor == b.background.photoOverlayColor &&
+            a.logo.sourceType == b.logo.sourceType &&
+            a.logo.iconKey == b.logo.iconKey &&
+            a.logo.emoji == b.logo.emoji &&
+            a.logo.monogramText == b.logo.monogramText &&
+            a.logo.galleryUri == b.logo.galleryUri &&
+            a.logo.clipShape == b.logo.clipShape &&
+            a.logo.paddingStyle == b.logo.paddingStyle &&
+            a.logo.backingEnabled == b.logo.backingEnabled &&
+            a.logo.backingColor == b.logo.backingColor &&
+            a.logo.borderEnabled == b.logo.borderEnabled &&
+            a.outerFrame.style == b.outerFrame.style &&
+            a.outerFrame.label == b.outerFrame.label &&
+            a.outerFrame.subtitle == b.outerFrame.subtitle &&
+            a.outerFrame.frameFillColor == b.outerFrame.frameFillColor &&
+            a.outerFrame.accentColor == b.outerFrame.accentColor &&
+            a.outerFrame.accentSecondaryColor == b.outerFrame.accentSecondaryColor &&
+            a.outerFrame.textColor == b.outerFrame.textColor &&
+            a.ecc == b.ecc &&
+            a.exportSizePx == b.exportSizePx &&
+            a.matrixShadowEnabled == b.matrixShadowEnabled
+        return discreteUnchanged
+    }
+
+    fun undoDesignEdit() {
+        if (undoStack.isEmpty()) return
+        val previous = undoStack.removeLast()
+        if (redoStack.size >= 30) redoStack.removeFirst()
+        redoStack.addLast(_draft.value)
+        lastHistoryKind = null
+        _draft.value = previous
+        syncUndoFlags()
+    }
+
+    fun redoDesignEdit() {
+        if (redoStack.isEmpty()) return
+        val next = redoStack.removeLast()
+        if (undoStack.size >= 30) undoStack.removeFirst()
+        undoStack.addLast(_draft.value)
+        lastHistoryKind = null
+        _draft.value = next
+        syncUndoFlags()
+    }
+
     fun startNewQr(type: QrContentType = QrContentType.URL) {
         val defaultPayload = when (type) {
             QrContentType.URL -> QrPayloadFields(url = "https://")
@@ -116,6 +224,7 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
         val baseDesign = PresetCatalog.builtInPresets.first().design.copy(
             exportSizePx = preferences.value.defaultExportResolution.coerceIn(512, 4096)
         )
+        clearHistory()
         _draft.value = StudioDraftState(
             editingId = null,
             title = "",
@@ -128,6 +237,7 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openExistingQr(item: QrCreationItem) {
+        clearHistory()
         _draft.value = StudioDraftState(
             editingId = item.id,
             title = item.title,
@@ -137,6 +247,110 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
             isFavorite = item.isFavorite,
             isDirty = false
         )
+    }
+
+    fun importQrFromUri(uri: Uri, onLoaded: () -> Unit) {
+        viewModelScope.launch {
+            val decoded = withContext(Dispatchers.Default) {
+                com.hkm.qraft.qr.QrCodeImporter.decodeFromUri(getApplication(), uri)
+            }
+            if (decoded == null) {
+                _statusBanner.tryEmit("No readable QR code detected in that image")
+                return@launch
+            }
+            val baseDesign = PresetCatalog.builtInPresets.first().design.copy(
+                exportSizePx = preferences.value.defaultExportResolution.coerceIn(512, 4096)
+            )
+            clearHistory()
+            _draft.value = StudioDraftState(
+                editingId = null,
+                title = decoded.suggestedTitle,
+                type = decoded.type,
+                payload = decoded.fields,
+                design = baseDesign,
+                isFavorite = false,
+                isDirty = true
+            )
+            _statusBanner.tryEmit("Imported ${decoded.type.title} QR • Ready to remix")
+            onLoaded()
+        }
+    }
+
+    fun importSharedPayload(rawText: String, onLoaded: () -> Unit = {}) {
+        val clean = rawText.trim()
+        if (clean.isEmpty()) return
+        val decoded = com.hkm.qraft.qr.QrCodeImporter.parsePayloadToImport(clean)
+        val baseDesign = PresetCatalog.builtInPresets.first().design.copy(
+            exportSizePx = preferences.value.defaultExportResolution.coerceIn(512, 4096)
+        )
+        clearHistory()
+        _draft.value = StudioDraftState(
+            editingId = null,
+            title = decoded.suggestedTitle,
+            type = decoded.type,
+            payload = decoded.fields,
+            design = baseDesign,
+            isFavorite = false,
+            isDirty = true
+        )
+        _statusBanner.tryEmit("Loaded ${decoded.type.title} content into Studio")
+        onLoaded()
+    }
+
+    fun extractAndApplyBrandPalette(fromLogo: Boolean) {
+        val currentDesign = _draft.value.design
+        val uriString = if (fromLogo) currentDesign.logo.galleryUri else currentDesign.background.photoUri
+        if (uriString.isNullOrBlank()) {
+            _statusBanner.tryEmit(if (fromLogo) "Pick a logo image first" else "Pick a background photo first")
+            return
+        }
+        viewModelScope.launch {
+            val extracted = withContext(Dispatchers.IO) {
+                com.hkm.qraft.qr.PaletteExtractor.extractFromUri(getApplication(), Uri.parse(uriString))
+            }
+            if (extracted == null) {
+                _statusBanner.tryEmit("Could not read image colors")
+                return@launch
+            }
+            updateDraftWithHistory("palette_extract", 0L) { state ->
+                val d = state.design
+                val updatedBg = when {
+                    !fromLogo && d.background.mode == BackgroundMode.PHOTO -> {
+                        d.background.copy(
+                            photoOverlayColor = extracted.lightCanvasArgb,
+                            photoOverlayAlpha = maxOf(d.background.photoOverlayAlpha, 0.72f)
+                        )
+                    }
+                    d.background.mode == BackgroundMode.TRANSPARENT -> d.background
+                    else -> d.background.copy(
+                        mode = BackgroundMode.SOLID,
+                        brush = BrushStyleConfig(mode = BrushMode.SOLID, primaryColor = extracted.lightCanvasArgb)
+                    )
+                }
+                state.copy(
+                    design = d.copy(
+                        darkBrush = BrushStyleConfig(
+                            mode = BrushMode.LINEAR_GRADIENT,
+                            primaryColor = extracted.primaryDarkArgb,
+                            secondaryColor = extracted.secondaryAccentArgb,
+                            direction = GradientDirection.TOP_LEFT_TO_BOTTOM_RIGHT
+                        ),
+                        customEyeFrameColors = false,
+                        customEyeBallColors = true,
+                        eyeBallBrush = BrushStyleConfig(
+                            mode = BrushMode.SOLID,
+                            primaryColor = extracted.frameAccentArgb
+                        ),
+                        background = updatedBg,
+                        outerFrame = d.outerFrame.copy(accentColor = extracted.frameAccentArgb)
+                    ),
+                    isDirty = true
+                )
+            }
+            _statusBanner.tryEmit(
+                "Extracted brand colors (${String.format(java.util.Locale.US, "%.1f", extracted.contrastOnCanvas)}:1 contrast)"
+            )
+        }
     }
 
     fun duplicateQr(item: QrCreationItem) {
@@ -153,27 +367,36 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun updateDraftTitle(title: String) {
-        _draft.update { it.copy(title = title, isDirty = true) }
+        updateDraftWithHistory("title", 650L) { it.copy(title = title, isDirty = true) }
     }
 
     fun updateDraftType(type: QrContentType) {
-        _draft.update { it.copy(type = type, isDirty = true) }
+        updateDraftWithHistory("type", 0L) { it.copy(type = type, isDirty = true) }
     }
 
     fun updateDraftPayload(payload: QrPayloadFields) {
-        _draft.update { it.copy(payload = payload, isDirty = true) }
+        updateDraftWithHistory("payload", 650L) { it.copy(payload = payload, isDirty = true) }
     }
 
     fun updateDraftDesign(design: QrDesignSpec) {
-        _draft.update { it.copy(design = design, isDirty = true) }
+        val current = _draft.value.design
+        val continuous = isContinuousDesignTweak(current, design)
+        updateDraftWithHistory(
+            commitKind = if (continuous) "design_slider" else "design_discrete",
+            coalesceWindowMs = if (continuous) 450L else 0L
+        ) {
+            it.copy(design = design, isDirty = true)
+        }
     }
 
     fun toggleDraftFavorite() {
-        _draft.update { it.copy(isFavorite = !it.isFavorite, isDirty = true) }
+        updateDraftWithHistory("favorite", 0L) { it.copy(isFavorite = !it.isFavorite, isDirty = true) }
     }
 
     fun applyPreset(preset: SavedStylePreset) {
-        _draft.update { it.copy(design = preset.design, isDirty = true) }
+        updateDraftWithHistory("preset", 0L) {
+            it.copy(design = preset.design.copy(exportSizePx = it.design.exportSizePx), isDirty = true)
+        }
         _statusBanner.tryEmit("Applied \"${preset.name}\"")
     }
 
@@ -193,9 +416,9 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
         val balls = QrEyeBallStyle.entries
         val mode = if (Random.nextBoolean()) BrushMode.LINEAR_GRADIENT else BrushMode.SOLID
 
-        val current = _draft.value.design
-        _draft.update {
-            it.copy(
+        updateDraftWithHistory("randomize", 0L) { state ->
+            val current = state.design
+            state.copy(
                 design = current.copy(
                     pixelStyle = pixels[Random.nextInt(pixels.size)],
                     eyeFrameStyle = frames[Random.nextInt(frames.size)],
@@ -220,14 +443,14 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun autoFixScannability() {
-        val current = _draft.value.design
-        val fixedLogo = if (current.logo.sourceType != LogoSourceType.NONE && current.logo.sizeFraction > 0.23f) {
-            current.logo.copy(sizeFraction = 0.21f, paddingStyle = LogoPaddingStyle.NATURAL, backingEnabled = true)
-        } else {
-            current.logo
-        }
-        _draft.update {
-            it.copy(
+        updateDraftWithHistory("autofix", 0L) { state ->
+            val current = state.design
+            val fixedLogo = if (current.logo.sourceType != LogoSourceType.NONE && current.logo.sizeFraction > 0.23f) {
+                current.logo.copy(sizeFraction = 0.21f, paddingStyle = LogoPaddingStyle.NATURAL, backingEnabled = true)
+            } else {
+                current.logo
+            }
+            state.copy(
                 design = current.copy(
                     darkBrush = current.darkBrush.copy(primaryColor = 0xFF1E1D1B),
                     background = current.background.copy(

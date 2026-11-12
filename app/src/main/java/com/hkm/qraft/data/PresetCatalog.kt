@@ -247,6 +247,140 @@ object PresetCatalog {
                     frameFillColor = 0xFFFFFFFF
                 )
             )
+        ),
+        SavedStylePreset(
+            id = "preset_frosted_glass",
+            name = "Frosted Studio",
+            subtitle = "Translucent rim • Cobalt gradient",
+            design = QrDesignSpec(
+                pixelStyle = QrPixelStyle.SHIELD,
+                pixelCornerRoundness = 0.42f,
+                eyeFrameStyle = QrEyeFrameStyle.CIRCLE,
+                eyeBallStyle = QrEyeBallStyle.CIRCLE,
+                darkBrush = BrushStyleConfig(
+                    mode = BrushMode.LINEAR_GRADIENT,
+                    primaryColor = 0xFF1E3A8A,
+                    secondaryColor = 0xFF3B82F6,
+                    direction = GradientDirection.TOP_LEFT_TO_BOTTOM_RIGHT
+                ),
+                outerFrame = OuterFrameConfig(
+                    style = OuterFrameStyle.GLASS_CARD,
+                    label = "FROSTED QR",
+                    frameFillColor = 0xFFF7FAFF,
+                    accentColor = 0xFF1D4ED8,
+                    textColor = 0xFFFFFFFF,
+                    cornerRadiusDp = 28f
+                ),
+                matrixShadowEnabled = true
+            )
+        ),
+        SavedStylePreset(
+            id = "preset_camera_finder",
+            name = "Camera Finder",
+            subtitle = "Viewfinder brackets • Emerald ink",
+            design = QrDesignSpec(
+                pixelStyle = QrPixelStyle.LIQUID,
+                pixelCornerRoundness = 0.48f,
+                eyeFrameStyle = QrEyeFrameStyle.SQUIRCLE,
+                eyeBallStyle = QrEyeBallStyle.LEAF,
+                darkBrush = BrushStyleConfig(
+                    mode = BrushMode.SOLID,
+                    primaryColor = 0xFF065F46
+                ),
+                customEyeBallColors = true,
+                eyeBallBrush = BrushStyleConfig(
+                    mode = BrushMode.SOLID,
+                    primaryColor = 0xFF059669
+                ),
+                outerFrame = OuterFrameConfig(
+                    style = OuterFrameStyle.CORNER_BRACKET,
+                    label = "AIM TO SCAN",
+                    frameFillColor = 0xFFFBFDFC,
+                    accentColor = 0xFF059669,
+                    textColor = 0xFFFFFFFF
+                ),
+                matrixShadowEnabled = true
+            )
+        ),
+        SavedStylePreset(
+            id = "preset_roastery_menu",
+            name = "Roastery Menu",
+            subtitle = "Twin pill frame • Warm espresso",
+            design = QrDesignSpec(
+                pixelStyle = QrPixelStyle.ROUNDED,
+                pixelCornerRoundness = 0.55f,
+                eyeFrameStyle = QrEyeFrameStyle.THREE_ROUND,
+                eyeBallStyle = QrEyeBallStyle.ROUNDED,
+                darkBrush = BrushStyleConfig(
+                    mode = BrushMode.SOLID,
+                    primaryColor = 0xFF432110
+                ),
+                background = BackgroundStyleConfig(
+                    mode = BackgroundMode.SOLID,
+                    brush = BrushStyleConfig(mode = BrushMode.SOLID, primaryColor = 0xFFFFF8F1)
+                ),
+                outerFrame = OuterFrameConfig(
+                    style = OuterFrameStyle.DOUBLE_PILL,
+                    label = "CAFE MENU",
+                    subtitle = "ORDER AT TABLE",
+                    frameFillColor = 0xFFFCEFE3,
+                    accentColor = 0xFF5A3320,
+                    textColor = 0xFFFFFFFF
+                ),
+                matrixShadowEnabled = true
+            )
+        ),
+        SavedStylePreset(
+            id = "preset_sunset_coral",
+            name = "Sunset Coral",
+            subtitle = "Magenta-rose sweep • Crisp paper",
+            design = QrDesignSpec(
+                pixelStyle = QrPixelStyle.ROUNDED,
+                pixelCornerRoundness = 0.4f,
+                eyeFrameStyle = QrEyeFrameStyle.LEAF_TL_BR,
+                eyeBallStyle = QrEyeBallStyle.CIRCLE,
+                darkBrush = BrushStyleConfig(
+                    mode = BrushMode.LINEAR_GRADIENT,
+                    primaryColor = 0xFF9D174D,
+                    secondaryColor = 0xFFE11D48,
+                    direction = GradientDirection.LEFT_TO_RIGHT
+                ),
+                outerFrame = OuterFrameConfig(
+                    style = OuterFrameStyle.BOTTOM_SCAN_BANNER,
+                    label = "OPEN LINK",
+                    frameFillColor = 0xFFFFF8FA,
+                    accentColor = 0xFFBE185D,
+                    textColor = 0xFFFFFFFF
+                )
+            )
+        ),
+        SavedStylePreset(
+            id = "preset_hexa_graphite",
+            name = "Hexa Graphite",
+            subtitle = "Hexagon matrix • Diamond eyes",
+            design = QrDesignSpec(
+                pixelStyle = QrPixelStyle.HEXAGON,
+                eyeFrameStyle = QrEyeFrameStyle.CHAMFER,
+                eyeBallStyle = QrEyeBallStyle.DIAMOND,
+                codeSilhouette = QrCodeSilhouette.HEXAGON,
+                darkBrush = BrushStyleConfig(
+                    mode = BrushMode.SOLID,
+                    primaryColor = 0xFF18181B
+                ),
+                customEyeBallColors = true,
+                eyeBallBrush = BrushStyleConfig(
+                    mode = BrushMode.SOLID,
+                    primaryColor = 0xFF2563EB
+                ),
+                outerFrame = OuterFrameConfig(
+                    style = OuterFrameStyle.CLEAN_CARD,
+                    label = "GRAPHITE",
+                    frameFillColor = 0xFFFFFFFF,
+                    accentColor = 0xFF27272A
+                ),
+                ecc = QrEccSetting.HIGH,
+                quietZonePadding = 0.11f
+            )
         )
     )
 

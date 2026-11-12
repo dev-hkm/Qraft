@@ -245,7 +245,9 @@ enum class OuterFrameStyle(val label: String) {
     GRADIENT_BORDER("Gradient Ring"),
     POLAROID_STAMP("Polaroid"),
     DOUBLE_PILL("Twin Pill"),
-    WARM_POSTER("Poster")
+    WARM_POSTER("Poster"),
+    GLASS_CARD("Glass Card"),
+    CORNER_BRACKET("Viewfinder")
 }
 
 data class OuterFrameConfig(
@@ -302,7 +304,8 @@ data class QrDesignSpec(
     val outerFrame: OuterFrameConfig = OuterFrameConfig(),
     val ecc: QrEccSetting = QrEccSetting.AUTO,
     val quietZonePadding: Float = 0.10f,
-    val exportSizePx: Int = 4096
+    val exportSizePx: Int = 4096,
+    val matrixShadowEnabled: Boolean = false
 )
 
 data class QrCreationItem(

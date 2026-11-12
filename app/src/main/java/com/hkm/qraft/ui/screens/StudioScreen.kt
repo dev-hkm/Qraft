@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -13,6 +14,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -20,17 +22,28 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Redo
+import androidx.compose.material.icons.automirrored.rounded.Undo
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.abs
+import java.util.Locale
 import com.hkm.qraft.StudioDraftState
 import com.hkm.qraft.data.PresetCatalog
 import com.hkm.qraft.model.*
@@ -54,6 +67,11 @@ fun StudioScreen(
     customPresets: List<SavedStylePreset>,
     scannability: ScannabilityReport,
     isVerifying: Boolean,
+    canUndo: Boolean = false,
+    canRedo: Boolean = false,
+    onUndo: () -> Unit = {},
+    onRedo: () -> Unit = {},
+    onExtractBrandColors: ((Boolean) -> Unit)? = null,
     onBack: () -> Unit,
     onTitleChange: (String) -> Unit,
     onTypeChange: (QrContentType) -> Unit,
@@ -79,6 +97,19 @@ fun StudioScreen(
         animationSpec = AppleSprings.snappy(),
         label = "previewViewportSize"
     )
+    var tiltTargetX by remember { mutableFloatStateOf(0f) }
+    var tiltTargetY by remember { mutableFloatStateOf(0f) }
+    val animTiltX by animateFloatAsState(
+        targetValue = tiltTargetX,
+        animationSpec = AppleSprings.TactileBounce,
+        label = "previewTiltX"
+    )
+    val animTiltY by animateFloatAsState(
+        targetValue = tiltTargetY,
+        animationSpec = AppleSprings.TactileBounce,
+        label = "previewTiltY"
+    )
+    val densityPx = LocalDensity.current.density
 
     Column(
         modifier = Modifier
@@ -87,21 +118,26 @@ fun StudioScreen(
             .statusBarsPadding()
             .imePadding()
     ) {
-        // Spacious Top Apple Bar (keeps title readable even on 360dp phones)
+        // Spacious Top Apple Bar with Undo/Redo
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             QraftHeaderCircleButton(
                 icon = Icons.Rounded.ArrowBackIosNew,
                 contentDescription = "Back",
+                size = 40.dp,
                 onClick = onBack
             )
 
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 4.dp)
+            ) {
                 Text(
                     text = draft.effectiveTitle,
                     style = MaterialTheme.typography.titleLarge,
@@ -110,7 +146,7 @@ fun StudioScreen(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "Qraft Studio • ${draft.type.title} • ${draft.design.exportSizePx}px",
+                    text = "Studio • ${draft.type.shortCode} • ${draft.design.exportSizePx}px",
                     style = MaterialTheme.typography.labelSmall,
                     color = colors.textSecondary,
                     maxLines = 1,
@@ -119,8 +155,29 @@ fun StudioScreen(
             }
 
             QraftHeaderCircleButton(
+                icon = Icons.AutoMirrored.Rounded.Undo,
+                contentDescription = "Undo",
+                size = 38.dp,
+                enabled = canUndo,
+                contentColor = if (canUndo) colors.textPrimary else colors.textTertiary,
+                modifier = Modifier.alpha(if (canUndo) 1f else 0.45f),
+                onClick = onUndo
+            )
+
+            QraftHeaderCircleButton(
+                icon = Icons.AutoMirrored.Rounded.Redo,
+                contentDescription = "Redo",
+                size = 38.dp,
+                enabled = canRedo,
+                contentColor = if (canRedo) colors.textPrimary else colors.textTertiary,
+                modifier = Modifier.alpha(if (canRedo) 1f else 0.45f),
+                onClick = onRedo
+            )
+
+            QraftHeaderCircleButton(
                 icon = Icons.Rounded.Casino,
                 contentDescription = "Randomize style",
+                size = 38.dp,
                 contentColor = colors.espressoAccent,
                 onClick = onRandomizeStyle
             )
@@ -128,6 +185,7 @@ fun StudioScreen(
             QraftHeaderCircleButton(
                 icon = if (draft.isFavorite) Icons.Rounded.Star else Icons.Rounded.StarOutline,
                 contentDescription = "Favorite",
+                size = 38.dp,
                 contentColor = if (draft.isFavorite) colors.timelineDotActive else colors.textSecondary,
                 onClick = onToggleFavorite
             )
@@ -155,7 +213,23 @@ fun StudioScreen(
                     horizontalArrangement = if (previewCompact) Arrangement.Start else Arrangement.Center
                 ) {
                     Box(
-                        modifier = Modifier.appleBounceClick(scalePressed = 0.97f) { onOpenFullscreen() }
+                        modifier = Modifier
+                            .pointerInput(Unit) {
+                                detectDragGestures(
+                                    onDragEnd = { tiltTargetX = 0f; tiltTargetY = 0f },
+                                    onDragCancel = { tiltTargetX = 0f; tiltTargetY = 0f }
+                                ) { change, dragAmount ->
+                                    change.consume()
+                                    tiltTargetY = (tiltTargetY + dragAmount.x * 0.08f).coerceIn(-14f, 14f)
+                                    tiltTargetX = (tiltTargetX - dragAmount.y * 0.08f).coerceIn(-14f, 14f)
+                                }
+                            }
+                            .graphicsLayer {
+                                rotationX = animTiltX
+                                rotationY = animTiltY
+                                cameraDistance = 14f * densityPx
+                            }
+                            .appleBounceClick(scalePressed = 0.97f) { onOpenFullscreen() }
                     ) {
                         QrArtworkPreview(
                             data = draft.encodedPayload,
@@ -163,6 +237,25 @@ fun StudioScreen(
                             qrViewportSize = animatedViewportSize,
                             showCheckerboardForTransparent = true
                         )
+                        val glintStrength = ((abs(animTiltX) + abs(animTiltY)) / 24f).coerceIn(0f, 1f)
+                        if (glintStrength > 0.02f) {
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .clip(RoundedCornerShape(22.dp))
+                                    .background(
+                                        Brush.linearGradient(
+                                            colors = listOf(
+                                                Color.White.copy(alpha = 0.24f * glintStrength),
+                                                Color.Transparent,
+                                                Color.White.copy(alpha = 0.10f * glintStrength)
+                                            ),
+                                            start = Offset(0f, 0f),
+                                            end = Offset(420f + animTiltY * 18f, 420f - animTiltX * 18f)
+                                        )
+                                    )
+                            )
+                        }
                     }
 
                     if (previewCompact) {
@@ -216,6 +309,14 @@ fun StudioScreen(
                             onClick = { previewCompact = !previewCompact }
                         )
                     }
+                }
+
+                if (!previewCompact) {
+                    QrTelemetryGaugeRow(
+                        charCount = draft.encodedPayload.length,
+                        matrixSize = scannability.matrixSize,
+                        contrastRatio = scannability.contrastRatio
+                    )
                 }
 
                 Row(
@@ -368,13 +469,15 @@ fun StudioScreen(
                     StudioTab.COLORS -> ColorsEditorTab(
                         design = draft.design,
                         onDesignChange = onDesignChange,
-                        onPickBackgroundPhoto = onPickBackgroundPhoto
+                        onPickBackgroundPhoto = onPickBackgroundPhoto,
+                        onExtractColorsFromPhoto = { onExtractBrandColors?.invoke(false) }
                     )
 
                     StudioTab.LOGO -> LogoEditorTab(
                         design = draft.design,
                         onDesignChange = onDesignChange,
-                        onPickLogoPhoto = onPickLogoPhoto
+                        onPickLogoPhoto = onPickLogoPhoto,
+                        onExtractColorsFromLogo = { onExtractBrandColors?.invoke(true) }
                     )
 
                     StudioTab.FRAME -> FrameAndProTab(
@@ -435,6 +538,62 @@ private fun ScannabilityStatusPill(
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun QrTelemetryGaugeRow(
+    charCount: Int,
+    matrixSize: Int,
+    contrastRatio: Double
+) {
+    val colors = QraftThemeTokens.colors
+    val targetDensity = (charCount / 220f).coerceIn(0.08f, 1f)
+    val densityProgress by animateFloatAsState(
+        targetValue = targetDensity,
+        animationSpec = AppleSprings.Smooth,
+        label = "densityBar"
+    )
+    val contrastColor = when {
+        contrastRatio >= 4.5 -> colors.successFg
+        contrastRatio >= 3.0 -> colors.warningFg
+        else -> colors.dangerFg
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(colors.surfaceMuted.copy(alpha = 0.72f))
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            text = "$charCount chars • ${matrixSize}×$matrixSize",
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.textSecondary
+        )
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(5.dp)
+                .clip(CircleShape)
+                .background(colors.cardBorder)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(densityProgress)
+                    .clip(CircleShape)
+                    .background(colors.espressoAccent)
+            )
+        }
+        Text(
+            text = "${String.format(Locale.US, "%.1f", contrastRatio)}:1",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = contrastColor
         )
     }
 }

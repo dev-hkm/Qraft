@@ -1,11 +1,18 @@
 package com.hkm.qraft
 
+import android.content.Intent
 import android.graphics.Color as AndroidColor
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.IntentCompat
+import androidx.core.util.Consumer
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -74,14 +81,30 @@ class MainActivity : ComponentActivity() {
             }
 
             QraftTheme(themeMode = prefs.themeMode) {
-                QraftAppRoot(viewModel = viewModel)
+                var pendingIntent by remember { mutableStateOf(intent) }
+                DisposableEffect(this) {
+                    val listener = Consumer<Intent> { newIntent ->
+                        pendingIntent = newIntent
+                    }
+                    addOnNewIntentListener(listener)
+                    onDispose { removeOnNewIntentListener(listener) }
+                }
+                QraftAppRoot(
+                    viewModel = viewModel,
+                    incomingIntent = pendingIntent,
+                    onConsumeIncomingIntent = { pendingIntent = null }
+                )
             }
         }
     }
 }
 
 @Composable
-fun QraftAppRoot(viewModel: QraftViewModel) {
+fun QraftAppRoot(
+    viewModel: QraftViewModel,
+    incomingIntent: Intent? = null,
+    onConsumeIncomingIntent: () -> Unit = {}
+) {
     val navController = rememberNavController()
     val savedItems by viewModel.savedItems.collectAsStateWithLifecycle()
     val customPresets by viewModel.customPresets.collectAsStateWithLifecycle()
@@ -91,6 +114,38 @@ fun QraftAppRoot(viewModel: QraftViewModel) {
     val scannability by viewModel.scannability.collectAsStateWithLifecycle()
     val isVerifying by viewModel.isVerifying.collectAsStateWithLifecycle()
     val isExporting by viewModel.isExporting.collectAsStateWithLifecycle()
+    val canUndo by viewModel.canUndo.collectAsStateWithLifecycle()
+    val canRedo by viewModel.canRedo.collectAsStateWithLifecycle()
+
+    val qrImportPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.importQrFromUri(uri) {
+                navController.navigate(Routes.STUDIO) { launchSingleTop = true }
+            }
+        }
+    }
+    val launchQrImport: () -> Unit = {
+        qrImportPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+    }
+
+    LaunchedEffect(incomingIntent) {
+        val currentIntent = incomingIntent ?: return@LaunchedEffect
+        if (currentIntent.action == Intent.ACTION_SEND) {
+            val sharedText = currentIntent.getStringExtra(Intent.EXTRA_TEXT)
+            val sharedUri = IntentCompat.getParcelableExtra(currentIntent, Intent.EXTRA_STREAM, Uri::class.java)
+            when {
+                sharedUri != null -> viewModel.importQrFromUri(sharedUri) {
+                    navController.navigate(Routes.STUDIO) { launchSingleTop = true }
+                }
+                !sharedText.isNullOrBlank() -> viewModel.importSharedPayload(sharedText) {
+                    navController.navigate(Routes.STUDIO) { launchSingleTop = true }
+                }
+            }
+        }
+        onConsumeIncomingIntent()
+    }
 
     var showCreatePicker by remember { mutableStateOf(false) }
     var showExportSheet by remember { mutableStateOf(false) }
@@ -151,7 +206,8 @@ fun QraftAppRoot(viewModel: QraftViewModel) {
                     onToggleFavorite = viewModel::toggleItemFavorite,
                     onOpenLibrary = { navController.navigate(Routes.LIBRARY) },
                     onOpenBatch = { showBatchSheet = true },
-                    onOpenCreatePicker = { showCreatePicker = true }
+                    onOpenCreatePicker = { showCreatePicker = true },
+                    onImportQr = launchQrImport
                 )
             }
 
@@ -174,7 +230,8 @@ fun QraftAppRoot(viewModel: QraftViewModel) {
                         )
                     },
                     onOpenBatch = { showBatchSheet = true },
-                    onCreateNew = { showCreatePicker = true }
+                    onCreateNew = { showCreatePicker = true },
+                    onImportQr = launchQrImport
                 )
             }
 
@@ -184,6 +241,11 @@ fun QraftAppRoot(viewModel: QraftViewModel) {
                     customPresets = customPresets,
                     scannability = scannability,
                     isVerifying = isVerifying,
+                    canUndo = canUndo,
+                    canRedo = canRedo,
+                    onUndo = viewModel::undoDesignEdit,
+                    onRedo = viewModel::redoDesignEdit,
+                    onExtractBrandColors = viewModel::extractAndApplyBrandPalette,
                     onBack = { navController.popBackStack() },
                     onTitleChange = viewModel::updateDraftTitle,
                     onTypeChange = viewModel::updateDraftType,
@@ -253,7 +315,8 @@ fun QraftAppRoot(viewModel: QraftViewModel) {
             onSelectType = { type ->
                 viewModel.startNewQr(type)
                 navController.navigate(Routes.STUDIO)
-            }
+            },
+            onImportQrImage = launchQrImport
         )
     }
 

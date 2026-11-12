@@ -40,7 +40,8 @@ fun LibraryScreen(
     onDelete: (String) -> Unit,
     onQuickFullscreen: (QrCreationItem) -> Unit,
     onOpenBatch: () -> Unit,
-    onCreateNew: () -> Unit
+    onCreateNew: () -> Unit,
+    onImportQr: () -> Unit = {}
 ) {
     val colors = QraftThemeTokens.colors
     var search by remember { mutableStateOf("") }
@@ -76,37 +77,57 @@ fun LibraryScreen(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(
+                        modifier = Modifier.weight(1f),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         QraftHeaderCircleButton(
                             icon = Icons.Rounded.ArrowBackIosNew,
                             contentDescription = "Back",
+                            size = 40.dp,
                             onClick = onBack
                         )
-                        Text("QR Library", style = MaterialTheme.typography.headlineMedium, color = colors.textPrimary)
+                        Text(
+                            text = "QR Library",
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = colors.textPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        QraftHeaderCircleButton(
+                            icon = Icons.Rounded.QrCodeScanner,
+                            contentDescription = "Import & Remix QR",
+                            size = 40.dp,
+                            onClick = onImportQr
+                        )
                         FilledTonalButton(
                             onClick = onOpenBatch,
                             shape = RoundedCornerShape(50),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                             colors = ButtonDefaults.filledTonalButtonColors(
                                 containerColor = colors.surfaceMuted,
                                 contentColor = colors.textPrimary
                             )
                         ) {
                             Icon(Icons.Rounded.AutoAwesomeMotion, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Batch")
+                            Spacer(Modifier.width(5.dp))
+                            Text("Batch", maxLines = 1)
                         }
-                        Button(
-                            onClick = onCreateNew,
-                            shape = RoundedCornerShape(50),
-                            colors = ButtonDefaults.buttonColors(containerColor = colors.espressoAccent)
-                        ) {
-                            Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                        }
+                        QraftHeaderCircleButton(
+                            icon = Icons.Rounded.Add,
+                            contentDescription = "Create new QR",
+                            size = 40.dp,
+                            containerColor = colors.espressoAccent,
+                            contentColor = colors.espressoAccentContent,
+                            borderColor = colors.espressoAccent,
+                            onClick = onCreateNew
+                        )
                     }
                 }
 

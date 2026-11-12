@@ -385,15 +385,20 @@ object QrEngine {
         val w = targetWidthPx
         val hasSubtitle = frame.style == OuterFrameStyle.WARM_POSTER && frame.subtitle.isNotBlank()
         val extraBottom = when (frame.style) {
-            OuterFrameStyle.BOTTOM_SCAN_BANNER -> (w * 0.19f).roundToInt()
+            OuterFrameStyle.BOTTOM_SCAN_BANNER,
+            OuterFrameStyle.GLASS_CARD -> (w * 0.19f).roundToInt()
             OuterFrameStyle.SPEECH_BUBBLE -> (w * 0.25f).roundToInt()
-            OuterFrameStyle.POLAROID_STAMP -> (w * 0.19f).roundToInt()
+            OuterFrameStyle.POLAROID_STAMP,
+            OuterFrameStyle.CORNER_BRACKET -> (w * 0.19f).roundToInt()
             OuterFrameStyle.WARM_POSTER -> (w * (if (hasSubtitle) 0.24f else 0.19f)).roundToInt()
             OuterFrameStyle.DOUBLE_PILL -> (w * 0.19f).roundToInt()
             OuterFrameStyle.TOP_BADGE_CARD -> (w * 0.13f).roundToInt()
             else -> (w * 0.04f).roundToInt()
         }
-        val extraTop = if (frame.style == OuterFrameStyle.TOP_BADGE_CARD || frame.style == OuterFrameStyle.DOUBLE_PILL) {
+        val extraTop = if (
+            frame.style == OuterFrameStyle.TOP_BADGE_CARD ||
+            frame.style == OuterFrameStyle.DOUBLE_PILL
+        ) {
             (w * 0.13f).roundToInt()
         } else {
             0
@@ -415,9 +420,35 @@ object QrEngine {
 
         val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
-            color = frame.frameFillColor.toInt()
+            color = if (frame.style == OuterFrameStyle.GLASS_CARD) {
+                (frame.frameFillColor.toInt() and 0x00FFFFFF) or (232 shl 24)
+            } else {
+                frame.frameFillColor.toInt()
+            }
         }
         canvas.drawRoundRect(cardRect, cornerR, cornerR, cardPaint)
+
+        if (frame.style == OuterFrameStyle.GLASS_CARD) {
+            val sheenPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.FILL
+                shader = LinearGradient(
+                    cardRect.left, cardRect.top, cardRect.left, cardRect.bottom,
+                    0x44FFFFFF, 0x05FFFFFF, Shader.TileMode.CLAMP
+                )
+            }
+            canvas.drawRoundRect(cardRect, cornerR, cornerR, sheenPaint)
+            val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = max(w * 0.008f, 3f)
+                shader = LinearGradient(
+                    cardRect.left, cardRect.top, cardRect.right, cardRect.bottom,
+                    0xCCFFFFFF.toInt(),
+                    ((frame.accentColor and 0x00FFFFFFL) or 0x55000000L).toInt(),
+                    Shader.TileMode.CLAMP
+                )
+            }
+            canvas.drawRoundRect(cardRect, cornerR, cornerR, rimPaint)
+        }
 
         if (frame.style == OuterFrameStyle.SPEECH_BUBBLE) {
             val tailHalfW = w * 0.065f
@@ -463,12 +494,65 @@ object QrEngine {
         val qrPad = w * 0.085f
         val qrSize = (w - qrPad * 2f).roundToInt()
         val qrTop = (margin + extraTop + w * 0.045f).roundToInt()
-        val qrCore = renderQrCoreBitmap(context, data, design, qrSize)
         val qrCorner = cornerR * 0.65f
+        val qrRect = RectF(qrPad, qrTop.toFloat(), qrPad + qrSize, qrTop + qrSize.toFloat())
+        if (design.matrixShadowEnabled) {
+            val outerGlow = RectF(
+                qrRect.left - w * 0.008f,
+                qrRect.top + w * 0.008f,
+                qrRect.right + w * 0.008f,
+                qrRect.bottom + w * 0.022f
+            )
+            canvas.drawRoundRect(
+                outerGlow,
+                qrCorner + w * 0.01f,
+                qrCorner + w * 0.01f,
+                Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x12000000 }
+            )
+            val innerShadow = RectF(
+                qrRect.left - w * 0.003f,
+                qrRect.top + w * 0.004f,
+                qrRect.right + w * 0.003f,
+                qrRect.bottom + w * 0.012f
+            )
+            canvas.drawRoundRect(
+                innerShadow,
+                qrCorner + w * 0.004f,
+                qrCorner + w * 0.004f,
+                Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x1A000000 }
+            )
+        }
+        if (frame.style == OuterFrameStyle.CORNER_BRACKET) {
+            val inset = w * 0.018f
+            val left = qrRect.left - inset
+            val top = qrRect.top - inset
+            val right = qrRect.right + inset
+            val bottom = qrRect.bottom + inset
+            val leg = w * 0.085f
+            val bracketPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = max(w * 0.016f, 6f)
+                strokeCap = Paint.Cap.ROUND
+                strokeJoin = Paint.Join.ROUND
+                color = frame.accentColor.toInt()
+            }
+            val bp = android.graphics.Path().apply {
+                // Top-left
+                moveTo(left, top + leg); lineTo(left, top); lineTo(left + leg, top)
+                // Top-right
+                moveTo(right - leg, top); lineTo(right, top); lineTo(right, top + leg)
+                // Bottom-left
+                moveTo(left, bottom - leg); lineTo(left, bottom); lineTo(left + leg, bottom)
+                // Bottom-right
+                moveTo(right - leg, bottom); lineTo(right, bottom); lineTo(right, bottom - leg)
+            }
+            canvas.drawPath(bp, bracketPaint)
+        }
+        val qrCore = renderQrCoreBitmap(context, data, design, qrSize)
         val qrSave = canvas.save()
         val qrClip = android.graphics.Path().apply {
             addRoundRect(
-                RectF(qrPad, qrTop.toFloat(), qrPad + qrSize, qrTop + qrSize.toFloat()),
+                qrRect,
                 qrCorner,
                 qrCorner,
                 android.graphics.Path.Direction.CW
@@ -521,7 +605,9 @@ object QrEngine {
 
         when (frame.style) {
             OuterFrameStyle.BOTTOM_SCAN_BANNER,
-            OuterFrameStyle.SPEECH_BUBBLE -> {
+            OuterFrameStyle.SPEECH_BUBBLE,
+            OuterFrameStyle.GLASS_CARD,
+            OuterFrameStyle.CORNER_BRACKET -> {
                 val pillW = w * 0.64f
                 val pillH = w * 0.112f
                 val pillLeft = (w - pillW) / 2f
@@ -691,7 +777,9 @@ object QrEngine {
         val hasSubtitle = frame.style == OuterFrameStyle.WARM_POSTER && frame.subtitle.isNotBlank()
         val extraBottom = when (frame.style) {
             OuterFrameStyle.NONE -> 0f
-            OuterFrameStyle.BOTTOM_SCAN_BANNER -> innerQrDim * 0.20f
+            OuterFrameStyle.BOTTOM_SCAN_BANNER,
+            OuterFrameStyle.GLASS_CARD,
+            OuterFrameStyle.CORNER_BRACKET -> innerQrDim * 0.20f
             OuterFrameStyle.SPEECH_BUBBLE -> innerQrDim * 0.27f
             OuterFrameStyle.POLAROID_STAMP -> innerQrDim * 0.20f
             OuterFrameStyle.WARM_POSTER -> innerQrDim * (if (hasSubtitle) 0.25f else 0.20f)
@@ -763,12 +851,45 @@ object QrEngine {
                 sb.appendLine(
                     """  <rect x="${fmt(cardMargin + strokeW / 2f)}" y="${fmt(cardMargin + strokeW / 2f)}" width="${fmt(totalW - cardMargin * 2f - strokeW)}" height="${fmt(cardBottom - cardMargin - strokeW)}" rx="${fmt(cardCorner)}" fill="none" stroke="url(#qrFrameAccent)" stroke-width="${fmt(strokeW)}"/>"""
                 )
+            } else if (frame.style == OuterFrameStyle.GLASS_CARD) {
+                val strokeW = max(totalW * 0.008f, 3f)
+                sb.appendLine(
+                    """  <rect x="${fmt(cardMargin + strokeW / 2f)}" y="${fmt(cardMargin + strokeW / 2f)}" width="${fmt(totalW - cardMargin * 2f - strokeW)}" height="${fmt(cardBottom - cardMargin - strokeW)}" rx="${fmt(cardCorner)}" fill="none" stroke="${toSvgHex(frame.accentColor)}" stroke-opacity="0.35" stroke-width="${fmt(strokeW)}"/>"""
+                )
             } else if (frame.borderThicknessDp > 0f) {
                 val strokeW = (frame.borderThicknessDp / 360f) * totalW
                 sb.appendLine(
                     """  <rect x="${fmt(cardMargin)}" y="${fmt(cardMargin)}" width="${fmt(totalW - cardMargin * 2f)}" height="${fmt(cardBottom - cardMargin)}" rx="${fmt(cardCorner)}" fill="none" stroke="${toSvgHex(frame.accentColor)}" stroke-width="${fmt(strokeW)}"/>"""
                 )
             }
+            if (frame.style == OuterFrameStyle.CORNER_BRACKET) {
+                val inset = totalW * 0.018f
+                val l = qrOriginX - inset
+                val t = qrOriginY - inset
+                val r = qrOriginX + innerQrDim + inset
+                val b = qrOriginY + innerQrDim + inset
+                val leg = totalW * 0.085f
+                val sw = max(totalW * 0.015f, 5f)
+                val accentHex = toSvgHex(frame.accentColor)
+                val pathD = "M ${fmt(l)} ${fmt(t + leg)} L ${fmt(l)} ${fmt(t)} L ${fmt(l + leg)} ${fmt(t)} " +
+                    "M ${fmt(r - leg)} ${fmt(t)} L ${fmt(r)} ${fmt(t)} L ${fmt(r)} ${fmt(t + leg)} " +
+                    "M ${fmt(l)} ${fmt(b - leg)} L ${fmt(l)} ${fmt(b)} L ${fmt(l + leg)} ${fmt(b)} " +
+                    "M ${fmt(r - leg)} ${fmt(b)} L ${fmt(r)} ${fmt(b)} L ${fmt(r)} ${fmt(b - leg)}"
+                sb.appendLine(
+                    """  <path d="$pathD" fill="none" stroke="$accentHex" stroke-width="${fmt(sw)}" stroke-linecap="round" stroke-linejoin="round"/>"""
+                )
+            }
+        }
+
+        if (design.matrixShadowEnabled) {
+            val sPad = innerQrDim * 0.008f
+            val sDrop = innerQrDim * 0.02f
+            sb.appendLine(
+                """  <rect x="${fmt(qrOriginX - sPad)}" y="${fmt(qrOriginY + sDrop * 0.4f)}" width="${fmt(innerQrDim + sPad * 2f)}" height="${fmt(innerQrDim + sDrop * 0.7f)}" rx="${fmt(qrCorner + sPad)}" fill="#000000" fill-opacity="0.08"/>"""
+            )
+            sb.appendLine(
+                """  <rect x="${fmt(qrOriginX - sPad * 0.4f)}" y="${fmt(qrOriginY + sDrop * 0.2f)}" width="${fmt(innerQrDim + sPad * 0.8f)}" height="${fmt(innerQrDim + sDrop * 0.35f)}" rx="${fmt(qrCorner)}" fill="#000000" fill-opacity="0.10"/>"""
+            )
         }
 
         // QR core background
@@ -945,7 +1066,9 @@ object QrEngine {
 
             when (frame.style) {
                 OuterFrameStyle.BOTTOM_SCAN_BANNER,
-                OuterFrameStyle.SPEECH_BUBBLE -> {
+                OuterFrameStyle.SPEECH_BUBBLE,
+                OuterFrameStyle.GLASS_CARD,
+                OuterFrameStyle.CORNER_BRACKET -> {
                     appendSvgPill(safeLabel, qrOriginY + innerQrDim + innerQrDim * 0.042f, 0.60f, 0.105f)
                 }
                 OuterFrameStyle.WARM_POSTER -> {
