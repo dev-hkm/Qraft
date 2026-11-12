@@ -1,5 +1,6 @@
 package com.hkm.qraft.ui.components
 
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -352,7 +353,8 @@ private enum class ColorTarget(val label: String) {
 @Composable
 fun ColorsEditorTab(
     design: QrDesignSpec,
-    onDesignChange: (QrDesignSpec) -> Unit
+    onDesignChange: (QrDesignSpec) -> Unit,
+    onPickBackgroundPhoto: ((Uri) -> Unit)? = null
 ) {
     val colors = QraftThemeTokens.colors
     var target by remember { mutableStateOf(ColorTarget.PIXELS) }
@@ -362,14 +364,18 @@ fun ColorsEditorTab(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
-            onDesignChange(
-                design.copy(
-                    background = design.background.copy(
-                        mode = BackgroundMode.PHOTO,
-                        photoUri = uri.toString()
+            if (onPickBackgroundPhoto != null) {
+                onPickBackgroundPhoto(uri)
+            } else {
+                onDesignChange(
+                    design.copy(
+                        background = design.background.copy(
+                            mode = BackgroundMode.PHOTO,
+                            photoUri = uri.toString()
+                        )
                     )
                 )
-            )
+            }
         }
     }
 
@@ -673,12 +679,13 @@ private fun BrushEditorCard(
                         colors = SwitchDefaults.colors(checkedTrackColor = colors.espressoAccent)
                     )
                 }
-                if (hasMid) {
+                val midColor = brush.tertiaryColor
+                if (midColor != null) {
                     ColorSwatchRow(
                         label = "Mid Color",
-                        argb = brush.tertiaryColor!!,
+                        argb = midColor,
                         onClick = {
-                            onPickColor("Mid Gradient Color", brush.tertiaryColor) { newC ->
+                            onPickColor("Mid Gradient Color", midColor) { newC ->
                                 onBrushChange(brush.copy(tertiaryColor = newC))
                             }
                         }
@@ -719,7 +726,8 @@ private fun BrushEditorCard(
 @Composable
 fun LogoEditorTab(
     design: QrDesignSpec,
-    onDesignChange: (QrDesignSpec) -> Unit
+    onDesignChange: (QrDesignSpec) -> Unit,
+    onPickLogoPhoto: ((Uri) -> Unit)? = null
 ) {
     val colors = QraftThemeTokens.colors
     val logo = design.logo
@@ -729,14 +737,18 @@ fun LogoEditorTab(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
-            onDesignChange(
-                design.copy(
-                    logo = logo.copy(
-                        sourceType = LogoSourceType.GALLERY,
-                        galleryUri = uri.toString()
+            if (onPickLogoPhoto != null) {
+                onPickLogoPhoto(uri)
+            } else {
+                onDesignChange(
+                    design.copy(
+                        logo = logo.copy(
+                            sourceType = LogoSourceType.GALLERY,
+                            galleryUri = uri.toString()
+                        )
                     )
                 )
-            )
+            }
         }
     }
 
@@ -1110,15 +1122,10 @@ fun FrameAndProTab(
         )
 
         SectionLabel("Raster Export Resolution")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(512, 1024, 2048, 4096).forEach { px ->
-                SelectableChip(
-                    label = if (px == 4096) "4K (4096)" else "${px}px",
-                    selected = design.exportSizePx == px,
-                    onClick = { onDesignChange(design.copy(exportSizePx = px)) }
-                )
-            }
-        }
+        QraftResolutionSelector(
+            selectedPx = design.exportSizePx,
+            onSelect = { px -> onDesignChange(design.copy(exportSizePx = px)) }
+        )
     }
 
     colorDialog?.let { (label, initial, onConfirm) ->

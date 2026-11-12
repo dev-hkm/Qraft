@@ -130,9 +130,11 @@ fun ExportQrSheet(
     design: QrDesignSpec,
     initialFormat: ExportImageFormat,
     isExporting: Boolean,
+    onDesignChange: (QrDesignSpec) -> Unit,
     onDismiss: () -> Unit,
     onSave: (ExportImageFormat) -> Unit,
     onShare: (ExportImageFormat) -> Unit,
+    onCopyImage: () -> Unit,
     onCopyPayload: () -> Unit
 ) {
     val colors = QraftThemeTokens.colors
@@ -148,7 +150,7 @@ fun ExportQrSheet(
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -169,11 +171,23 @@ fun ExportQrSheet(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = "Export at ${design.exportSizePx}px • High clarity",
+                        text = when (selectedFormat) {
+                            ExportImageFormat.SVG -> "True Infinite Vector • ${design.exportSizePx}px viewport"
+                            ExportImageFormat.PDF -> "300 DPI Print Sheet • A4 (2480×3508)"
+                            else -> if (design.exportSizePx >= 4096) "4K UHD (${design.exportSizePx}px) • Print Clarity" else "${design.exportSizePx}px High Clarity"
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.textSecondary
                     )
                 }
+            }
+
+            if (selectedFormat != ExportImageFormat.PDF) {
+                SectionLabel("Output Resolution")
+                QraftResolutionSelector(
+                    selectedPx = design.exportSizePx,
+                    onSelect = { px -> onDesignChange(design.copy(exportSizePx = px)) }
+                )
             }
 
             SectionLabel("Export Format")
@@ -234,53 +248,44 @@ fun ExportQrSheet(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                OutlinedButton(
-                    onClick = { onShare(selectedFormat) },
+                QraftPillButton(
+                    text = "Share",
+                    variant = QraftButtonVariant.SECONDARY,
+                    leadingIcon = Icons.Rounded.Share,
                     enabled = !isExporting,
-                    shape = RoundedCornerShape(50),
-                    border = BorderStroke(1.dp, colors.espressoAccent),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(50.dp)
-                ) {
-                    Icon(Icons.Rounded.Share, contentDescription = null, tint = colors.espressoAccent, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Share", color = colors.espressoAccent, fontWeight = FontWeight.SemiBold)
-                }
+                    modifier = Modifier.weight(1f),
+                    onClick = { onShare(selectedFormat) }
+                )
 
-                Button(
-                    onClick = { onSave(selectedFormat) },
-                    enabled = !isExporting,
-                    shape = RoundedCornerShape(50),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = colors.espressoAccent,
-                        contentColor = colors.espressoAccentContent
-                    ),
-                    modifier = Modifier
-                        .weight(1.3f)
-                        .height(50.dp)
-                ) {
-                    if (isExporting) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            color = colors.espressoAccentContent,
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Save ${selectedFormat.extension.uppercase()}", fontWeight = FontWeight.SemiBold)
-                    }
-                }
+                QraftPillButton(
+                    text = "Save ${selectedFormat.extension.uppercase()}",
+                    variant = QraftButtonVariant.PRIMARY,
+                    leadingIcon = Icons.Rounded.Download,
+                    loading = isExporting,
+                    modifier = Modifier.weight(1.35f),
+                    onClick = { onSave(selectedFormat) }
+                )
             }
 
-            TextButton(
-                onClick = onCopyPayload,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Rounded.ContentCopy, contentDescription = null, tint = colors.textSecondary, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Copy Raw Payload Text", color = colors.textSecondary)
+                TextButton(
+                    onClick = onCopyImage,
+                    enabled = !isExporting
+                ) {
+                    Icon(Icons.Rounded.Image, contentDescription = null, tint = colors.espressoAccent, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Copy QR Image", color = colors.espressoAccent, fontWeight = FontWeight.SemiBold)
+                }
+
+                TextButton(onClick = onCopyPayload) {
+                    Icon(Icons.Rounded.ContentCopy, contentDescription = null, tint = colors.textSecondary, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Copy Raw Text", color = colors.textSecondary)
+                }
             }
         }
     }
@@ -465,7 +470,8 @@ fun SettingsModalSheet(
     onThemeChange: (ThemeMode) -> Unit,
     onCreatorNameChange: (String) -> Unit,
     onAutoVerifyChange: (Boolean) -> Unit,
-    onDefaultFormatChange: (ExportImageFormat) -> Unit
+    onDefaultFormatChange: (ExportImageFormat) -> Unit,
+    onDefaultResolutionChange: (Int) -> Unit
 ) {
     val colors = QraftThemeTokens.colors
     var nameDraft by remember(preferences.creatorName) { mutableStateOf(preferences.creatorName) }
@@ -533,6 +539,12 @@ fun SettingsModalSheet(
                     )
                 }
             }
+
+            SectionLabel("Default Export Resolution")
+            QraftResolutionSelector(
+                selectedPx = preferences.defaultExportResolution,
+                onSelect = onDefaultResolutionChange
+            )
         }
     }
 }

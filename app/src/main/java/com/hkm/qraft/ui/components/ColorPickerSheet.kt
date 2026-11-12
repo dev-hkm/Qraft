@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -23,6 +24,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hkm.qraft.qr.QrEngine
 import com.hkm.qraft.ui.theme.QraftThemeTokens
 import com.hkm.qraft.ui.theme.appleBounceClick
 import kotlin.math.roundToInt
@@ -35,6 +37,15 @@ object ColorSwatches {
         0xFFFFFFFF, 0xFFFAF7F4, 0xFFFCD8BE, 0xFFE4F0C8,
         0xFFF5DCF1, 0xFFDCEEFF, 0xFF191614, 0xFF282320
     )
+    val recent = mutableStateListOf<Long>()
+
+    fun recordRecent(argb: Long) {
+        recent.remove(argb)
+        recent.add(0, argb)
+        if (recent.size > 6) {
+            recent.removeAt(recent.lastIndex)
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -43,6 +54,7 @@ fun ColorPickerModalSheet(
     title: String,
     initialArgb: Long,
     allowAlpha: Boolean = false,
+    contrastAgainstArgb: Long? = null,
     onDismiss: () -> Unit,
     onColorSelected: (Long) -> Unit
 ) {
@@ -67,14 +79,18 @@ fun ColorPickerModalSheet(
         rgb.toLong() and 0xFFFFFFFFL
     }
 
-    var hexText by remember(currentColor) {
-        mutableStateOf(
-            if (allowAlpha) {
-                String.format("#%08X", currentColor)
-            } else {
-                String.format("#%06X", currentColor and 0xFFFFFFL)
-            }
-        )
+    fun formatHex(argb: Long): String = if (allowAlpha) {
+        String.format("#%08X", argb)
+    } else {
+        String.format("#%06X", argb and 0xFFFFFFL)
+    }
+
+    var isEditingHex by remember { mutableStateOf(false) }
+    var hexText by remember { mutableStateOf(formatHex(currentColor)) }
+    LaunchedEffect(currentColor, isEditingHex) {
+        if (!isEditingHex) {
+            hexText = formatHex(currentColor)
+        }
     }
 
     ModalBottomSheet(
@@ -228,7 +244,65 @@ fun ColorPickerModalSheet(
                 }
             }
 
-            // Quick swatches
+            // Live Contrast Ratio Indicator + Quick swatches
+            val vsLight = QrEngine.contrastRatio(currentColor, 0xFFFFFFFFL)
+            val vsDark = QrEngine.contrastRatio(currentColor, 0xFF1E1D1BL)
+            val targetContrast = contrastAgainstArgb?.let { QrEngine.contrastRatio(currentColor, it) }
+            val contrastSummary = if (targetContrast != null) {
+                "QR Contrast: ${"%.1f".format(targetContrast)}:1 • " +
+                    if (targetContrast >= 4.5) "Excellent" else if (targetContrast >= 3.0) "Good" else "Low Margin"
+            } else {
+                "Contrast vs White: ${"%.1f".format(vsLight)}:1 • vs Dark: ${"%.1f".format(vsDark)}:1"
+            }
+            val contrastOk = targetContrast?.let { it >= 3.0 } ?: (vsLight >= 3.0 || vsDark >= 3.0)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (contrastOk) colors.successBg else colors.warningBg)
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = contrastSummary,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (contrastOk) colors.successFg else colors.warningFg,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            if (ColorSwatches.recent.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Recent",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.textSecondary
+                    )
+                    ColorSwatches.recent.forEach { swatch ->
+                        Box(
+                            modifier = Modifier
+                                .size(26.dp)
+                                .clip(CircleShape)
+                                .background(Color(swatch))
+                                .border(1.dp, colors.cardBorder, CircleShape)
+                                .appleBounceClick {
+                                    val arr = FloatArray(3)
+                                    android.graphics.Color.colorToHSV(swatch.toInt(), arr)
+                                    hue = arr[0]
+                                    sat = arr[1]
+                                    value = arr[2]
+                                    isEditingHex = false
+                                }
+                        )
+                    }
+                }
+            }
+
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
@@ -250,6 +324,7 @@ fun ColorPickerModalSheet(
                                 hue = arr[0]
                                 sat = arr[1]
                                 value = arr[2]
+                                isEditingHex = false
                             }
                     )
                 }
@@ -282,23 +357,25 @@ fun ColorPickerModalSheet(
                     label = { Text("Hex Code") },
                     singleLine = true,
                     shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .weight(1f)
+                        .onFocusChanged { focusState ->
+                            isEditingHex = focusState.isFocused
+                            if (!focusState.isFocused) {
+                                hexText = formatHex(currentColor)
+                            }
+                        }
                 )
 
-                Button(
+                QraftPillButton(
+                    text = "Apply",
+                    variant = QraftButtonVariant.PRIMARY,
                     onClick = {
+                        ColorSwatches.recordRecent(currentColor)
                         onColorSelected(currentColor)
                         onDismiss()
-                    },
-                    shape = RoundedCornerShape(50),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = colors.espressoAccent,
-                        contentColor = colors.espressoAccentContent
-                    ),
-                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 14.dp)
-                ) {
-                    Text("Apply", fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                }
+                    }
+                )
             }
         }
     }

@@ -114,7 +114,7 @@ fun QrArtworkPreview(
     val label = frame.label.trim().ifBlank { "SCAN ME" }
 
     Box(
-        modifier = modifier,
+        modifier = modifier.padding(bottom = if (frame.style == OuterFrameStyle.SPEECH_BUBBLE) 12.dp else 0.dp),
         contentAlignment = Alignment.Center
     ) {
         if (frame.style == OuterFrameStyle.NONE) {
@@ -184,22 +184,37 @@ fun QrArtworkPreview(
                                         Brush.horizontalGradient(
                                             listOf(
                                                 Color(frame.accentColor),
-                                                if (frame.style == OuterFrameStyle.WARM_POSTER) Color(frame.accentSecondaryColor) else Color(frame.accentColor)
+                                                if (frame.style == OuterFrameStyle.WARM_POSTER) {
+                                                    Color(frame.accentSecondaryColor)
+                                                } else {
+                                                    Color(frame.accentColor)
+                                                }
                                             )
                                         )
                                     )
-                                    .padding(horizontal = 22.dp, vertical = 7.dp)
+                                    .padding(horizontal = 20.dp, vertical = 7.dp)
                             ) {
                                 Text(
                                     text = if (frame.style == OuterFrameStyle.DOUBLE_PILL && frame.subtitle.isNotBlank()) {
-                                        frame.subtitle
+                                        frame.subtitle.trim()
                                     } else {
                                         label
                                     },
                                     color = Color(frame.textColor),
-                                    fontSize = 12.5.sp,
+                                    fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
-                                    letterSpacing = 1.1.sp,
+                                    letterSpacing = 0.9.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            if (frame.style == OuterFrameStyle.WARM_POSTER && frame.subtitle.isNotBlank()) {
+                                Spacer(Modifier.height(5.dp))
+                                Text(
+                                    text = frame.subtitle.trim(),
+                                    color = Color(frame.accentColor),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -219,6 +234,22 @@ fun QrArtworkPreview(
                         }
                         else -> Unit
                     }
+                }
+            }
+            if (frame.style == OuterFrameStyle.SPEECH_BUBBLE) {
+                Canvas(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .offset(y = 10.dp)
+                        .size(width = 24.dp, height = 12.dp)
+                ) {
+                    val path = androidx.compose.ui.graphics.Path().apply {
+                        moveTo(0f, 0f)
+                        lineTo(size.width, 0f)
+                        lineTo(size.width / 2f, size.height)
+                        close()
+                    }
+                    drawPath(path, color = Color(frame.frameFillColor))
                 }
             }
         }

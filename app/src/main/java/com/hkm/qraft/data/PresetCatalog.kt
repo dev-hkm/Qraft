@@ -150,12 +150,13 @@ object PresetCatalog {
             subtitle = "Soft stars • Plum & berry",
             design = QrDesignSpec(
                 pixelStyle = QrPixelStyle.STAR,
+                pixelSizeFactor = 1.0f,
                 eyeFrameStyle = QrEyeFrameStyle.THREE_ROUND,
                 eyeBallStyle = QrEyeBallStyle.STAR,
                 darkBrush = BrushStyleConfig(
                     mode = BrushMode.LINEAR_GRADIENT,
-                    primaryColor = 0xFF6A237E,
-                    secondaryColor = 0xFFCE54A8,
+                    primaryColor = 0xFF561869,
+                    secondaryColor = 0xFF9B2675,
                     direction = GradientDirection.TOP_LEFT_TO_BOTTOM_RIGHT
                 ),
                 outerFrame = OuterFrameConfig(
@@ -195,7 +196,7 @@ object PresetCatalog {
                     textColor = 0xFFFFFFFF
                 ),
                 ecc = QrEccSetting.HIGH,
-                quietZonePadding = 0.08f
+                quietZonePadding = 0.11f
             )
         ),
         SavedStylePreset(

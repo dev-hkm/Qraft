@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Label
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -111,7 +112,7 @@ fun ContentEditorTab(
             onValueChange = onTitleChange,
             label = "Card Label (for your library)",
             placeholder = QrPayloadEncoder.defaultTitle(type, fields),
-            leadingIcon = Icons.Rounded.Label
+            leadingIcon = Icons.AutoMirrored.Rounded.Label
         )
 
         // Dynamic content fields

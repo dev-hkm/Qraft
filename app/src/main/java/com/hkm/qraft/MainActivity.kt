@@ -189,6 +189,8 @@ fun QraftAppRoot(viewModel: QraftViewModel) {
                     onTypeChange = viewModel::updateDraftType,
                     onFieldsChange = viewModel::updateDraftPayload,
                     onDesignChange = viewModel::updateDraftDesign,
+                    onPickLogoPhoto = viewModel::persistAndApplyLogoUri,
+                    onPickBackgroundPhoto = viewModel::persistAndApplyBackgroundPhotoUri,
                     onToggleFavorite = viewModel::toggleDraftFavorite,
                     onApplyPreset = viewModel::applyPreset,
                     onSaveCustomPreset = viewModel::saveCurrentAsPreset,
@@ -262,9 +264,11 @@ fun QraftAppRoot(viewModel: QraftViewModel) {
             design = draft.design,
             initialFormat = prefs.defaultExportFormat,
             isExporting = isExporting,
+            onDesignChange = viewModel::updateDraftDesign,
             onDismiss = { showExportSheet = false },
             onSave = viewModel::saveExport,
             onShare = viewModel::shareExport,
+            onCopyImage = viewModel::copyExportImage,
             onCopyPayload = viewModel::copyPayload
         )
     }
@@ -289,7 +293,8 @@ fun QraftAppRoot(viewModel: QraftViewModel) {
             onThemeChange = viewModel::setThemeMode,
             onCreatorNameChange = viewModel::setCreatorName,
             onAutoVerifyChange = viewModel::setAutoVerify,
-            onDefaultFormatChange = viewModel::setDefaultExportFormat
+            onDefaultFormatChange = viewModel::setDefaultExportFormat,
+            onDefaultResolutionChange = viewModel::setDefaultExportResolution
         )
     }
 

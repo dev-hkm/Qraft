@@ -200,14 +200,12 @@ fun HomeScreen(
                 }
             }
 
-            // 2. Horizontal 7-Circle Category Strip (mirrors Mon 7 .. Sun 13 strip!)
+            // 2. Responsive 7-Circle Category Strip (mirrors Mon 7 .. Sun 13 evenly with zero edge clipping)
             item {
                 StaggeredReveal(index = 1) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         homeStripOptions.forEach { option ->
                             val selected = selectedCategory == option.type
@@ -231,7 +229,7 @@ fun HomeScreen(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier
-                                    .width(46.dp)
+                                    .weight(1f)
                                     .graphicsLayer {
                                         scaleX = scale
                                         scaleY = scale
@@ -246,11 +244,14 @@ fun HomeScreen(
                                     text = option.label,
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (selected) colors.textPrimary else colors.textSecondary
+                                    color = if (selected) colors.textPrimary else colors.textSecondary,
+                                    maxLines = 1
                                 )
                                 Box(
                                     modifier = Modifier
-                                        .size(44.dp)
+                                        .sizeIn(minWidth = 38.dp, minHeight = 38.dp, maxWidth = 46.dp, maxHeight = 46.dp)
+                                        .fillMaxWidth()
+                                        .aspectRatio(1f)
                                         .clip(CircleShape)
                                         .background(circleBg)
                                         .border(

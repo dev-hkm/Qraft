@@ -6,9 +6,10 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.Typeface
-import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -51,10 +52,18 @@ object QrExporter {
                         targetWidthPx = design.exportSizePx,
                         forceOpaqueWhiteForJpeg = format == ExportImageFormat.JPEG
                     )
-                    val uri = saveBitmapToGallery(context, bitmap, fileName, format)
+                    val uri = try {
+                        saveBitmapToGallery(context, bitmap, fileName, format)
+                    } finally {
+                        bitmap.recycle()
+                    }
                     ExportResult(
                         success = uri != null,
-                        message = if (uri != null) "Saved ${format.extension.uppercase()} to Pictures/Qraft" else "Could not save image",
+                        message = if (uri != null) {
+                            "Saved ${design.exportSizePx}px ${format.extension.uppercase()} to Pictures/Qraft"
+                        } else {
+                            "Could not save image"
+                        },
                         uri = uri
                     )
                 }
@@ -105,8 +114,12 @@ object QrExporter {
                         targetWidthPx = design.exportSizePx,
                         forceOpaqueWhiteForJpeg = format == ExportImageFormat.JPEG
                     )
-                    FileOutputStream(outFile).use { fos ->
-                        bitmap.compress(compressFormatFor(format), 96, fos)
+                    try {
+                        FileOutputStream(outFile).use { fos ->
+                            bitmap.compress(compressFormatFor(format), 96, fos)
+                        }
+                    } finally {
+                        bitmap.recycle()
                     }
                 }
                 ExportImageFormat.SVG -> {
@@ -144,60 +157,112 @@ object QrExporter {
         cm.setPrimaryClip(ClipData.newPlainText(label, payload))
     }
 
-    private fun renderPdfBytes(
+    suspend fun copyImageToClipboard(
+        context: Context,
+        title: String,
+        data: String,
+        design: QrDesignSpec
+    ): ExportResult = withContext(Dispatchers.IO) {
+        runCatching {
+            val dir = File(context.cacheDir, "exports").apply { mkdirs() }
+            val outFile = File(dir, "clipboard_${sanitizeFilename(title)}.png")
+            val clipWidth = design.exportSizePx.coerceIn(512, 2048)
+            val bitmap = QrEngine.renderFramedExportBitmap(
+                context = context,
+                data = data,
+                design = design,
+                targetWidthPx = clipWidth,
+                forceOpaqueWhiteForJpeg = false
+            )
+            try {
+                FileOutputStream(outFile).use { fos ->
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos)
+                }
+            } finally {
+                bitmap.recycle()
+            }
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                outFile
+            )
+            withContext(Dispatchers.Main) {
+                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                cm?.setPrimaryClip(ClipData.newUri(context.contentResolver, title.ifBlank { "Qraft QR" }, uri))
+            }
+            ExportResult(true, "Copied QR image (${clipWidth}px) to clipboard", uri)
+        }.getOrElse { err ->
+            ExportResult(false, "Copy image failed: ${err.localizedMessage ?: "unknown error"}")
+        }
+    }
+
+    fun renderPdfBytes(
         context: Context,
         title: String,
         data: String,
         design: QrDesignSpec
     ): ByteArray {
-        val doc = PdfDocument()
-        // Crisp A4-like print page at 150 DPI (1240 x 1754)
-        val pageW = 1240
-        val pageH = 1754
-        val pageInfo = PdfDocument.PageInfo.Builder(pageW, pageH, 1).create()
-        val page = doc.startPage(pageInfo)
-        val canvas = page.canvas
+        return QrPdfWriter.writeSinglePage {
+            renderSinglePrintPageBitmap(context, title, data, design)
+        }
+    }
+
+    fun renderSinglePrintPageBitmap(
+        context: Context,
+        title: String,
+        data: String,
+        design: QrDesignSpec
+    ): Bitmap {
+        val pageW = QrPdfWriter.A4_WIDTH_PX
+        val pageH = QrPdfWriter.A4_HEIGHT_PX
+        val pageBitmap = Bitmap.createBitmap(pageW, pageH, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(pageBitmap)
         canvas.drawColor(0xFFFAF7F4.toInt())
 
         val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = 0xFF1E1D1B.toInt()
             textAlign = Paint.Align.CENTER
-            textSize = 48f
+            textSize = 92f
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
         }
         val subtitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = 0xFF7B736C.toInt()
             textAlign = Paint.Align.CENTER
-            textSize = 24f
+            textSize = 42f
         }
 
-        canvas.drawText(title.ifBlank { "Qraft Studio QR" }, pageW / 2f, 180f, titlePaint)
-        canvas.drawText(data.take(72), pageW / 2f, 232f, subtitlePaint)
+        canvas.drawText(title.ifBlank { "Qraft Studio QR" }, pageW / 2f, 340f, titlePaint)
+        canvas.drawText(data.take(80), pageW / 2f, 430f, subtitlePaint)
 
         val qrBmp = QrEngine.renderFramedExportBitmap(
             context = context,
             data = data,
             design = design,
-            targetWidthPx = 880,
+            targetWidthPx = 1920,
             forceOpaqueWhiteForJpeg = false
         )
-        val left = (pageW - qrBmp.width) / 2f
-        val top = 310f + ((1150f - qrBmp.height).coerceAtLeast(0f) / 2f)
-        canvas.drawBitmap(qrBmp, left, top, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+        val availableH = 2380f
+        val drawScale = minOf(1f, availableH / qrBmp.height.toFloat())
+        val drawW = qrBmp.width * drawScale
+        val drawH = qrBmp.height * drawScale
+        val left = (pageW - drawW) / 2f
+        val top = 560f + ((availableH - drawH).coerceAtLeast(0f) / 2f)
+        val dst = RectF(left, top, left + drawW, top + drawH)
+        canvas.drawBitmap(qrBmp, null, dst, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+        qrBmp.recycle()
 
         val footerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = 0xFF8B837B.toInt()
             textAlign = Paint.Align.CENTER
-            textSize = 20f
+            textSize = 36f
         }
-        canvas.drawText("Created with Qraft QR Studio", pageW / 2f, pageH - 96f, footerPaint)
-
-        doc.finishPage(page)
-        return java.io.ByteArrayOutputStream().use { baos ->
-            doc.writeTo(baos)
-            doc.close()
-            baos.toByteArray()
-        }
+        canvas.drawText(
+            "300 DPI Print Ready • Qraft QR Studio",
+            pageW / 2f,
+            pageH - 160f,
+            footerPaint
+        )
+        return pageBitmap
     }
 
     private fun saveBitmapToGallery(

@@ -10,6 +10,7 @@ import android.graphics.PorterDuffColorFilter
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.net.Uri
+import android.webkit.MimeTypeMap
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.ui.graphics.Color
@@ -102,13 +103,14 @@ object LogoCatalog {
         when (config.sourceType) {
             LogoSourceType.GALLERY -> {
                 val uriStr = config.galleryUri
-                val photo = uriStr?.let { loadSampledUri(context, Uri.parse(it), outputPx) }
+                val photo = uriStr?.let { loadSampledUri(context, Uri.parse(it), outputPx.coerceAtMost(1600)) }
                 if (photo != null) {
                     val inset = if (config.backingEnabled) size * 0.07f else 0f
                     val dest = RectF(inset, inset, size - inset, size - inset)
                     val src = centerCropRect(photo.width, photo.height)
                     val bmpPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
                     canvas.drawBitmap(photo, src, dest, bmpPaint)
+                    photo.recycle()
                 } else {
                     drawMonogram(canvas, "IMG", config.iconTintColor.toInt(), size)
                 }
@@ -266,10 +268,61 @@ object LogoCatalog {
         return path
     }
 
+    fun persistPickedMedia(context: Context, sourceUri: Uri, prefix: String): String? {
+        return runCatching {
+            val dir = java.io.File(context.filesDir, "qraft_media").apply { mkdirs() }
+            val mime = context.contentResolver.getType(sourceUri)
+            val ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(mime)?.takeIf { it.isNotBlank() } ?: "png"
+            val outFile = java.io.File(dir, "${prefix}_${System.currentTimeMillis()}.$ext")
+            if (sourceUri.scheme == "file" && sourceUri.path != null) {
+                val srcFile = java.io.File(sourceUri.path!!)
+                if (srcFile.exists()) {
+                    if (srcFile.parentFile?.absolutePath == dir.absolutePath) {
+                        return@runCatching sourceUri.toString()
+                    }
+                    srcFile.copyTo(outFile, overwrite = true)
+                    return@runCatching Uri.fromFile(outFile).toString()
+                }
+            }
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(sourceUri)?.use {
+                BitmapFactory.decodeStream(it, null, bounds)
+            }
+            val maxStoredDim = 2048
+            if (bounds.outWidth in 1..maxStoredDim && bounds.outHeight in 1..maxStoredDim) {
+                context.contentResolver.openInputStream(sourceUri)?.use { input ->
+                    outFile.outputStream().use { output -> input.copyTo(output) }
+                }
+            } else {
+                val sampled = loadSampledUri(context, sourceUri, maxStoredDim)
+                if (sampled != null) {
+                    val pngFile = java.io.File(dir, "${prefix}_${System.currentTimeMillis()}.png")
+                    pngFile.outputStream().use { fos ->
+                        sampled.compress(Bitmap.CompressFormat.PNG, 100, fos)
+                    }
+                    sampled.recycle()
+                    return@runCatching Uri.fromFile(pngFile).toString()
+                } else {
+                    context.contentResolver.openInputStream(sourceUri)?.use { input ->
+                        outFile.outputStream().use { output -> input.copyTo(output) }
+                    }
+                }
+            }
+            Uri.fromFile(outFile).toString()
+        }.getOrNull()
+    }
+
     fun loadSampledUri(context: Context, uri: Uri, maxDim: Int): Bitmap? {
         return runCatching {
+            val openStream: () -> java.io.InputStream? = {
+                if (uri.scheme == "file" && uri.path != null) {
+                    java.io.FileInputStream(uri.path!!)
+                } else {
+                    context.contentResolver.openInputStream(uri)
+                }
+            }
             val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            context.contentResolver.openInputStream(uri)?.use {
+            openStream()?.use {
                 BitmapFactory.decodeStream(it, null, boundsOpts)
             }
             var sample = 1
@@ -277,7 +330,7 @@ object LogoCatalog {
                 sample *= 2
             }
             val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sample }
-            context.contentResolver.openInputStream(uri)?.use {
+            openStream()?.use {
                 BitmapFactory.decodeStream(it, null, decodeOpts)
             }
         }.getOrNull()

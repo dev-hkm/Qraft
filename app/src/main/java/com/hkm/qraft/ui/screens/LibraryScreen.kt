@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.sp
 import com.hkm.qraft.model.QrContentType
 import com.hkm.qraft.model.QrCreationItem
 import com.hkm.qraft.qr.QrPayloadEncoder
+import com.hkm.qraft.ui.components.QraftHeaderCircleButton
 import com.hkm.qraft.ui.components.QraftTextField
 import com.hkm.qraft.ui.components.SelectableChip
 import com.hkm.qraft.ui.components.iconForContentType
@@ -78,18 +79,11 @@ fun LibraryScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = colors.surface,
-                            border = BorderStroke(1.dp, colors.cardBorder),
-                            modifier = Modifier
-                                .size(40.dp)
-                                .appleBounceClick { onBack() }
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(Icons.Rounded.ArrowBackIosNew, contentDescription = "Back", tint = colors.textPrimary, modifier = Modifier.size(18.dp))
-                            }
-                        }
+                        QraftHeaderCircleButton(
+                            icon = Icons.Rounded.ArrowBackIosNew,
+                            contentDescription = "Back",
+                            onClick = onBack
+                        )
                         Text("QR Library", style = MaterialTheme.typography.headlineMedium, color = colors.textPrimary)
                     }
 

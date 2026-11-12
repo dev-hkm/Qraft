@@ -22,7 +22,7 @@ data class UserPreferences(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val autoVerifyScannability: Boolean = true,
     val defaultExportFormat: ExportImageFormat = ExportImageFormat.PNG,
-    val defaultExportResolution: Int = 2048,
+    val defaultExportResolution: Int = 4096,
     val creatorName: String = "Creator"
 )
 
@@ -77,7 +77,7 @@ class QraftRepository(private val context: Context) {
             defaultExportFormat = runCatching {
                 ExportImageFormat.valueOf(prefs[Keys.EXPORT_FORMAT] ?: ExportImageFormat.PNG.name)
             }.getOrDefault(ExportImageFormat.PNG),
-            defaultExportResolution = prefs[Keys.EXPORT_RESOLUTION] ?: 2048,
+            defaultExportResolution = prefs[Keys.EXPORT_RESOLUTION] ?: 4096,
             creatorName = prefs[Keys.CREATOR_NAME]?.takeIf { it.isNotBlank() } ?: "Creator"
         )
     }
@@ -94,13 +94,22 @@ class QraftRepository(private val context: Context) {
     }
 
     suspend fun saveItem(item: QrCreationItem) {
+        saveItems(listOf(item))
+    }
+
+    suspend fun saveItems(items: List<QrCreationItem>) {
+        if (items.isEmpty()) return
+        val now = System.currentTimeMillis()
         context.qraftDataStore.edit { prefs ->
             val current = decodeItems(prefs[Keys.ITEMS_JSON], prefs[Keys.SEEDED] == true).toMutableList()
-            val index = current.indexOfFirst { it.id == item.id }
-            if (index >= 0) {
-                current[index] = item.copy(updatedAtMillis = System.currentTimeMillis())
-            } else {
-                current.add(0, item.copy(updatedAtMillis = System.currentTimeMillis()))
+            items.asReversed().forEach { item ->
+                val index = current.indexOfFirst { it.id == item.id }
+                val stamped = item.copy(updatedAtMillis = now)
+                if (index >= 0) {
+                    current[index] = stamped
+                } else {
+                    current.add(0, stamped)
+                }
             }
             prefs[Keys.SEEDED] = true
             prefs[Keys.ITEMS_JSON] = gson.toJson(current)

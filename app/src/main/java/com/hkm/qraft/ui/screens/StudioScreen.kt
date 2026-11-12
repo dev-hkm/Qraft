@@ -1,7 +1,9 @@
 package com.hkm.qraft.ui.screens
 
+import android.net.Uri
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -57,6 +59,8 @@ fun StudioScreen(
     onTypeChange: (QrContentType) -> Unit,
     onFieldsChange: (QrPayloadFields) -> Unit,
     onDesignChange: (QrDesignSpec) -> Unit,
+    onPickLogoPhoto: (Uri) -> Unit,
+    onPickBackgroundPhoto: (Uri) -> Unit,
     onToggleFavorite: () -> Unit,
     onApplyPreset: (SavedStylePreset) -> Unit,
     onSaveCustomPreset: (String) -> Unit,
@@ -70,6 +74,11 @@ fun StudioScreen(
     val colors = QraftThemeTokens.colors
     var activeTab by remember { mutableStateOf(StudioTab.CONTENT) }
     var previewCompact by remember { mutableStateOf(false) }
+    val animatedViewportSize by animateDpAsState(
+        targetValue = if (previewCompact) 84.dp else 166.dp,
+        animationSpec = AppleSprings.snappy(),
+        label = "previewViewportSize"
+    )
 
     Column(
         modifier = Modifier
@@ -78,113 +87,53 @@ fun StudioScreen(
             .statusBarsPadding()
             .imePadding()
     ) {
-        // Top Apple Bar
+        // Spacious Top Apple Bar (keeps title readable even on 360dp phones)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.weight(1f)
-            ) {
-                Surface(
-                    shape = CircleShape,
-                    color = colors.surface,
-                    border = BorderStroke(1.dp, colors.cardBorder),
-                    modifier = Modifier
-                        .size(40.dp)
-                        .appleBounceClick { onBack() }
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.ArrowBackIosNew, contentDescription = "Back", tint = colors.textPrimary, modifier = Modifier.size(18.dp))
-                    }
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = draft.effectiveTitle,
-                        style = MaterialTheme.typography.titleLarge,
-                        color = colors.textPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = "Qraft Studio • ${draft.type.title}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.textSecondary
-                    )
-                }
+            QraftHeaderCircleButton(
+                icon = Icons.Rounded.ArrowBackIosNew,
+                contentDescription = "Back",
+                onClick = onBack
+            )
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = draft.effectiveTitle,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = colors.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "Qraft Studio • ${draft.type.title} • ${draft.design.exportSizePx}px",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
 
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Surface(
-                    shape = CircleShape,
-                    color = colors.surface,
-                    border = BorderStroke(1.dp, colors.cardBorder),
-                    modifier = Modifier
-                        .size(38.dp)
-                        .appleBounceClick { onRandomizeStyle() }
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.Casino, contentDescription = "Randomize style", tint = colors.espressoAccent, modifier = Modifier.size(19.dp))
-                    }
-                }
+            QraftHeaderCircleButton(
+                icon = Icons.Rounded.Casino,
+                contentDescription = "Randomize style",
+                contentColor = colors.espressoAccent,
+                onClick = onRandomizeStyle
+            )
 
-                Surface(
-                    shape = CircleShape,
-                    color = colors.surface,
-                    border = BorderStroke(1.dp, colors.cardBorder),
-                    modifier = Modifier
-                        .size(38.dp)
-                        .appleBounceClick { onToggleFavorite() }
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = if (draft.isFavorite) Icons.Rounded.Star else Icons.Rounded.StarOutline,
-                            contentDescription = "Favorite",
-                            tint = if (draft.isFavorite) colors.timelineDotActive else colors.textSecondary,
-                            modifier = Modifier.size(19.dp)
-                        )
-                    }
-                }
-
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(colors.surfaceMuted)
-                        .appleBounceClick { onSaveToLibrary() }
-                        .padding(horizontal = 13.dp, vertical = 8.dp)
-                ) {
-                    Text(
-                        text = "Save",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = colors.textPrimary
-                    )
-                }
-
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(colors.espressoAccent)
-                        .appleBounceClick { onOpenExport() }
-                        .padding(horizontal = 14.dp, vertical = 8.dp)
-                ) {
-                    Text(
-                        text = "Export",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = colors.espressoAccentContent
-                    )
-                }
-            }
+            QraftHeaderCircleButton(
+                icon = if (draft.isFavorite) Icons.Rounded.Star else Icons.Rounded.StarOutline,
+                contentDescription = "Favorite",
+                contentColor = if (draft.isFavorite) colors.timelineDotActive else colors.textSecondary,
+                onClick = onToggleFavorite
+            )
         }
 
-        // Sticky Live Preview Card (Tap QR for Fullscreen, collapse toggle to focus on editing)
+        // Sticky Live Preview Card (Tap QR for Fullscreen, Save & Export unified CTAs)
         Surface(
             shape = RoundedCornerShape(24.dp),
             color = colors.surface,
@@ -211,7 +160,7 @@ fun StudioScreen(
                         QrArtworkPreview(
                             data = draft.encodedPayload,
                             design = draft.design,
-                            qrViewportSize = if (previewCompact) 84.dp else 166.dp,
+                            qrViewportSize = animatedViewportSize,
                             showCheckerboardForTransparent = true
                         )
                     }
@@ -238,7 +187,7 @@ fun StudioScreen(
                     }
                 }
 
-                // Controls strip under preview
+                // Controls + Save / Export bar
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -258,7 +207,7 @@ fun StudioScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         SmallRoundAction(
                             icon = Icons.Rounded.Fullscreen,
-                            label = "Scan View",
+                            label = "Scan",
                             onClick = onOpenFullscreen
                         )
                         SmallRoundAction(
@@ -267,6 +216,28 @@ fun StudioScreen(
                             onClick = { previewCompact = !previewCompact }
                         )
                     }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    QraftPillButton(
+                        text = if (draft.editingId == null) "Save QR" else "Update QR",
+                        variant = QraftButtonVariant.TONAL,
+                        leadingIcon = Icons.Rounded.BookmarkAdded,
+                        height = 42.dp,
+                        modifier = Modifier.weight(1f),
+                        onClick = onSaveToLibrary
+                    )
+                    QraftPillButton(
+                        text = "Export 4K",
+                        variant = QraftButtonVariant.PRIMARY,
+                        leadingIcon = Icons.Rounded.IosShare,
+                        height = 42.dp,
+                        modifier = Modifier.weight(1.1f),
+                        onClick = onOpenExport
+                    )
                 }
 
                 if (!scannability.warningMessage.isNullOrBlank()) {
@@ -396,12 +367,14 @@ fun StudioScreen(
 
                     StudioTab.COLORS -> ColorsEditorTab(
                         design = draft.design,
-                        onDesignChange = onDesignChange
+                        onDesignChange = onDesignChange,
+                        onPickBackgroundPhoto = onPickBackgroundPhoto
                     )
 
                     StudioTab.LOGO -> LogoEditorTab(
                         design = draft.design,
-                        onDesignChange = onDesignChange
+                        onDesignChange = onDesignChange,
+                        onPickLogoPhoto = onPickLogoPhoto
                     )
 
                     StudioTab.FRAME -> FrameAndProTab(

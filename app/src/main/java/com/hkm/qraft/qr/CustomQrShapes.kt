@@ -4,7 +4,6 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathOperation
 import com.hkm.qraft.model.*
 import io.github.alexzhirkevich.qrose.Neighbors
 import io.github.alexzhirkevich.qrose.options.*
@@ -174,8 +173,43 @@ object CustomQrShapes {
     fun codeShape(silhouette: QrCodeSilhouette): QrCodeShape {
         return when (silhouette) {
             QrCodeSilhouette.SQUARE -> QrCodeShape.Default
-            QrCodeSilhouette.CIRCLE -> QrCodeShape.circle(padding = 1.08f)
-            QrCodeSilhouette.HEXAGON -> QrCodeShape.hexagon(rotation = 0f)
+            QrCodeSilhouette.CIRCLE -> ScannableSilhouetteShape(
+                delegate = QrCodeShape.circle(padding = 1.32f),
+                moatModules = 3
+            )
+            QrCodeSilhouette.HEXAGON -> ScannableSilhouetteShape(
+                delegate = QrCodeShape.hexagon(rotation = 0f),
+                moatModules = 2
+            )
+        }
+    }
+
+    private class ScannableSilhouetteShape(
+        private val delegate: QrCodeShape,
+        private val moatModules: Int
+    ) : QrCodeShape {
+        override val shapeSizeIncrease: Float
+            get() = delegate.shapeSizeIncrease
+
+        override fun QrCodeMatrix.transform(): QrCodeMatrix {
+            val out = with(delegate) { this@transform.transform() }
+            val coreSize = this.size
+            val total = out.size
+            val offset = (total - coreSize) / 2
+            if (offset <= 0) return out
+
+            val minClear = (offset - moatModules).coerceAtLeast(0)
+            val maxClear = (offset + coreSize + moatModules).coerceAtMost(total)
+            for (x in minClear until maxClear) {
+                for (y in minClear until maxClear) {
+                    val insideCore = x in offset until (offset + coreSize) &&
+                        y in offset until (offset + coreSize)
+                    if (!insideCore) {
+                        out[x, y] = QrCodeMatrix.PixelType.Background
+                    }
+                }
+            }
+            return out
         }
     }
 
@@ -192,8 +226,8 @@ object CustomQrShapes {
     private fun addSparkleStar(path: Path, size: Float, factor: Float) {
         val cx = size / 2f
         val cy = size / 2f
-        val outerR = (size / 2f) * factor.coerceIn(0.4f, 1.15f)
-        val innerR = outerR * 0.65f
+        val outerR = (size / 2f) * (factor * 1.14f).coerceIn(0.45f, 1.18f)
+        val innerR = outerR * 0.72f
         val points = 5
         for (i in 0 until points * 2) {
             val angle = (-90.0 + i * (180.0 / points)) * PI / 180.0

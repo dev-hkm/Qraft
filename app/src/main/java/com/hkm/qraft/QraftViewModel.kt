@@ -1,12 +1,14 @@
 package com.hkm.qraft
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.hkm.qraft.data.PresetCatalog
 import com.hkm.qraft.data.QraftRepository
 import com.hkm.qraft.data.UserPreferences
 import com.hkm.qraft.model.*
+import com.hkm.qraft.qr.LogoCatalog
 import com.hkm.qraft.qr.QrEngine
 import com.hkm.qraft.qr.QrExporter
 import com.hkm.qraft.qr.QrPayloadEncoder
@@ -111,12 +113,15 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
             QrContentType.WIFI -> QrPayloadFields(wifiSsid = "", wifiSecurity = WifiSecurity.WPA)
             else -> QrPayloadFields()
         }
+        val baseDesign = PresetCatalog.builtInPresets.first().design.copy(
+            exportSizePx = preferences.value.defaultExportResolution.coerceIn(512, 4096)
+        )
         _draft.value = StudioDraftState(
             editingId = null,
             title = "",
             type = type,
             payload = defaultPayload,
-            design = PresetCatalog.builtInPresets.first().design,
+            design = baseDesign,
             isFavorite = false,
             isDirty = false
         )
@@ -342,6 +347,57 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
         _statusBanner.tryEmit("Copied payload to clipboard")
     }
 
+    fun copyExportImage() {
+        val current = _draft.value
+        viewModelScope.launch {
+            _isExporting.value = true
+            val result = QrExporter.copyImageToClipboard(
+                context = getApplication(),
+                title = current.effectiveTitle,
+                data = current.encodedPayload,
+                design = current.design
+            )
+            _isExporting.value = false
+            _statusBanner.tryEmit(result.message)
+        }
+    }
+
+    fun persistAndApplyLogoUri(sourceUri: Uri) {
+        viewModelScope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                LogoCatalog.persistPickedMedia(getApplication(), sourceUri, "logo")
+            } ?: sourceUri.toString()
+            val currentDesign = _draft.value.design
+            updateDraftDesign(
+                currentDesign.copy(
+                    logo = currentDesign.logo.copy(
+                        sourceType = LogoSourceType.GALLERY,
+                        galleryUri = saved
+                    )
+                )
+            )
+            _statusBanner.tryEmit("Logo image imported cleanly")
+        }
+    }
+
+    fun persistAndApplyBackgroundPhotoUri(sourceUri: Uri) {
+        viewModelScope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                LogoCatalog.persistPickedMedia(getApplication(), sourceUri, "bg")
+            } ?: sourceUri.toString()
+            val currentDesign = _draft.value.design
+            updateDraftDesign(
+                currentDesign.copy(
+                    background = currentDesign.background.copy(
+                        mode = BackgroundMode.PHOTO,
+                        photoUri = saved
+                    )
+                )
+            )
+            _statusBanner.tryEmit("Background photo imported cleanly")
+        }
+    }
+
     fun runBatchGenerate(
         lines: List<String>,
         saveToLibrary: Boolean,
@@ -352,6 +408,7 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isExporting.value = true
             var exportedCount = 0
+            val batchItems = mutableListOf<QrCreationItem>()
             lines.forEachIndexed { idx, line ->
                 val isUrl = line.startsWith("http://") || line.startsWith("https://") || line.contains(".") && !line.contains(" ")
                 val type = if (isUrl) QrContentType.URL else QrContentType.TEXT
@@ -359,15 +416,13 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
                 val title = "Batch ${idx + 1} - ${QrPayloadEncoder.defaultTitle(type, fields)}"
 
                 if (saveToLibrary) {
-                    repository.saveItem(
-                        QrCreationItem(
-                            id = UUID.randomUUID().toString(),
-                            title = title,
-                            type = type,
-                            payload = fields,
-                            design = design,
-                            isVerifiedScannable = true
-                        )
+                    batchItems += QrCreationItem(
+                        id = UUID.randomUUID().toString(),
+                        title = title,
+                        type = type,
+                        payload = fields,
+                        design = design,
+                        isVerifiedScannable = true
                     )
                 }
                 if (exportPngs) {
@@ -381,10 +436,13 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
                     if (res.success) exportedCount++
                 }
             }
+            if (batchItems.isNotEmpty()) {
+                repository.saveItems(batchItems)
+            }
             _isExporting.value = false
             val summary = buildString {
                 append("Batch finished: ${lines.size} QR")
-                if (exportPngs) append(" • $exportedCount PNGs saved")
+                if (exportPngs) append(" • $exportedCount ${design.exportSizePx}px PNGs saved")
             }
             _statusBanner.tryEmit(summary)
             onComplete()
@@ -415,5 +473,9 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setDefaultExportFormat(format: ExportImageFormat) {
         viewModelScope.launch { repository.setDefaultExportFormat(format) }
+    }
+
+    fun setDefaultExportResolution(resolution: Int) {
+        viewModelScope.launch { repository.setDefaultExportResolution(resolution) }
     }
 }

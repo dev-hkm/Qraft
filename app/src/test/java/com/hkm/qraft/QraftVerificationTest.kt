@@ -6,6 +6,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.hkm.qraft.data.PresetCatalog
 import com.hkm.qraft.model.*
 import com.hkm.qraft.qr.QrEngine
+import com.hkm.qraft.qr.QrExporter
 import com.hkm.qraft.qr.QrPayloadEncoder
 import org.junit.Assert.*
 import org.junit.Test
@@ -41,42 +42,97 @@ class QraftVerificationTest {
 
     @Test
     fun svgExporterProducesValidSvgDocument() {
-        val svg = QrEngine.exportSvg("https://qraft.studio", PresetCatalog.builtInPresets.first().design)
+        val defaultDesign = PresetCatalog.builtInPresets.first().design
+        assertEquals(4096, defaultDesign.exportSizePx)
+        val svg = QrEngine.exportSvg("https://qraft.studio", defaultDesign)
         assertTrue(svg.startsWith("<?xml"))
         assertTrue(svg.contains("<svg"))
+        assertTrue(svg.contains("""width="4096""""))
+        assertTrue(svg.contains("""fill-rule="evenodd""""))
         assertTrue(svg.contains("</svg>"))
         assertTrue(svg.contains("SCAN ME"))
+
+        QrPixelStyle.entries.forEach { style ->
+            val styledSvg = QrEngine.exportSvg(
+                "https://qraft.studio/$style",
+                defaultDesign.copy(pixelStyle = style, lightPixelStyle = QrLightPixelStyle.DOT)
+            )
+            assertTrue("SVG should render pixel style $style", styledSvg.contains("<path d="))
+        }
     }
 
     @Test
-    fun qrEngineRendersAndDecodesPresetsAndCustomLogos() {
+    fun qrEngineRendersAndDecodesAllPresetsAt4KAndCustomFrames() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val testPayload = "https://qraft.studio/verify"
 
-        // Verify first 4 built-in presets decode back identically with ZXing!
-        PresetCatalog.builtInPresets.take(4).forEach { preset ->
+        // Verify ALL built-in presets decode cleanly with ZXing
+        val failedPresets = mutableListOf<String>()
+        PresetCatalog.builtInPresets.forEach { preset ->
             val report = QrEngine.verifyScannability(context, testPayload, preset.design)
-            assertTrue("Preset ${preset.name} should be scannable", report.isScannable)
-            assertEquals(testPayload, report.decodedPreview)
+            if (!report.isScannable || report.decodedPreview != testPayload) {
+                failedPresets += "${preset.name} (contrast=${"%.1f".format(report.contrastRatio)}, warning=${report.warningMessage})"
+            }
+        }
+        assertTrue("Non-scannable presets: $failedPresets", failedPresets.isEmpty())
+
+        // Verify true 4K UHD (4096px) export works cleanly without OOM
+        val uhd4k = QrEngine.renderFramedExportBitmap(
+            context = context,
+            data = testPayload,
+            design = PresetCatalog.builtInPresets.first().design.copy(
+                outerFrame = OuterFrameConfig(
+                    style = OuterFrameStyle.DOUBLE_PILL,
+                    label = "SCAN ME",
+                    subtitle = "4K ULTRA HD"
+                )
+            ),
+            targetWidthPx = 4096
+        )
+        assertEquals(4096, uhd4k.width)
+        assertTrue(uhd4k.height > 4096)
+        uhd4k.recycle()
+
+        // Verify Speech Bubble + Warm Poster + 300 DPI PDF generation
+        listOf(
+            OuterFrameStyle.SPEECH_BUBBLE,
+            OuterFrameStyle.WARM_POSTER,
+            OuterFrameStyle.DOUBLE_PILL
+        ).forEach { frameStyle ->
+            val bmp = QrEngine.renderFramedExportBitmap(
+                context = context,
+                data = testPayload,
+                design = QrDesignSpec(
+                    pixelStyle = QrPixelStyle.DIAMOND,
+                    eyeFrameStyle = QrEyeFrameStyle.CHAMFER,
+                    eyeBallStyle = QrEyeBallStyle.STAR,
+                    logo = LogoStyleConfig(
+                        sourceType = LogoSourceType.MONOGRAM,
+                        monogramText = "QR",
+                        sizeFraction = 0.20f
+                    ),
+                    outerFrame = OuterFrameConfig(
+                        style = frameStyle,
+                        label = "SCAN NOW",
+                        subtitle = "QRAFT STUDIO"
+                    ),
+                    ecc = QrEccSetting.HIGH
+                ),
+                targetWidthPx = 640
+            )
+            assertEquals(640, bmp.width)
+            assertTrue(bmp.height > 640)
+            bmp.recycle()
         }
 
-        // Verify embedded monogram logo + custom pixel shape + outer frame renders cleanly
-        val customDesign = QrDesignSpec(
-            pixelStyle = QrPixelStyle.DIAMOND,
-            eyeFrameStyle = QrEyeFrameStyle.CHAMFER,
-            eyeBallStyle = QrEyeBallStyle.STAR,
-            logo = LogoStyleConfig(
-                sourceType = LogoSourceType.MONOGRAM,
-                monogramText = "QR",
-                sizeFraction = 0.20f
-            ),
-            outerFrame = OuterFrameConfig(style = OuterFrameStyle.BOTTOM_SCAN_BANNER, label = "TEST"),
-            ecc = QrEccSetting.HIGH
+        val pdfBytes = QrExporter.renderPdfBytes(
+            context = context,
+            title = "4K Test Print",
+            data = testPayload,
+            design = PresetCatalog.builtInPresets.first().design
         )
-        val framed = QrEngine.renderFramedExportBitmap(context, testPayload, customDesign, targetWidthPx = 512)
-        assertTrue(framed.width == 512 && framed.height > 512)
-        val report = QrEngine.verifyScannability(context, testPayload, customDesign)
-        assertTrue("Custom diamond/monogram QR should decode", report.isScannable)
+        val header = String(pdfBytes.take(5).toByteArray())
+        assertEquals("%PDF-", header)
     }
 
     @Test

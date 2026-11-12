@@ -302,7 +302,7 @@ data class QrDesignSpec(
     val outerFrame: OuterFrameConfig = OuterFrameConfig(),
     val ecc: QrEccSetting = QrEccSetting.AUTO,
     val quietZonePadding: Float = 0.10f,
-    val exportSizePx: Int = 2048
+    val exportSizePx: Int = 4096
 )
 
 data class QrCreationItem(
