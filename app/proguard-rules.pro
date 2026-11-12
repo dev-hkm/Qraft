@@ -1,0 +1,3 @@
+-keep class com.hkm.qraft.model.** { *; }
+-keepattributes Signature
+-keepattributes *Annotation*

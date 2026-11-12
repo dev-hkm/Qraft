@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Qraft</string>
+    <style name="Theme.Qraft" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#FAF7F4</item>
+    </style>
+</resources>
