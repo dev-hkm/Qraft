@@ -357,45 +357,54 @@ fun HomeScreen(
                 StaggeredReveal(index = 3) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (selectedCategory == null) "Recent creations" else "${selectedCategory.title} codes",
+                            text = if (selectedCategory == null) "Recents" else selectedCategory.title,
                             style = MaterialTheme.typography.titleLarge,
-                            color = colors.textPrimary
+                            color = colors.textPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
                         )
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
                                 text = "Remix",
                                 style = MaterialTheme.typography.labelLarge,
                                 color = colors.espressoAccent,
+                                maxLines = 1,
+                                softWrap = false,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(50))
                                     .background(colors.heroBannerBg)
                                     .appleBounceClick { onImportQr() }
-                                    .padding(horizontal = 11.dp, vertical = 5.dp)
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
                             )
                             Text(
                                 text = "Batch",
                                 style = MaterialTheme.typography.labelLarge,
                                 color = colors.textSecondary,
+                                maxLines = 1,
+                                softWrap = false,
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(50))
                                     .background(colors.surfaceMuted)
                                     .appleBounceClick { onOpenBatch() }
-                                    .padding(horizontal = 11.dp, vertical = 5.dp)
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
                             )
                             Text(
                                 text = "See all",
                                 style = MaterialTheme.typography.labelLarge,
                                 color = colors.espressoAccent,
+                                maxLines = 1,
+                                softWrap = false,
                                 modifier = Modifier
                                     .appleBounceClick { onOpenLibrary() }
-                                    .padding(vertical = 4.dp)
+                                    .padding(start = 2.dp, top = 4.dp, bottom = 4.dp)
                             )
                         }
                     }

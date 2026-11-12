@@ -5,6 +5,14 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.hkm.qraft.data.PresetCatalog
@@ -20,17 +28,26 @@ import com.hkm.qraft.qr.QrEngine
 import com.hkm.qraft.qr.QrExporter
 import com.hkm.qraft.qr.QrPayloadEncoder
 import com.hkm.qraft.qr.QrPdfWriter
+import com.hkm.qraft.ui.screens.HomeScreen
+import com.hkm.qraft.ui.screens.StudioScreen
+import com.hkm.qraft.ui.theme.QraftTheme
 import org.junit.Assert.*
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import java.io.File
+import java.io.FileOutputStream
 
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [34])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class QraftVerificationTest {
+
+    @get:Rule
+    val composeRule = createComposeRule()
 
     @Test
     fun payloadEncoderFormatsAllTypesProperly() {
@@ -317,6 +334,144 @@ class QraftVerificationTest {
         assertEquals(1, restored.customPresets.size)
         assertEquals("Brand Slate", restored.customPresets.first().name)
         assertNull(QraftBackupManager.deserialize("not valid json"))
+    }
+
+    @Test
+    @Config(qualifiers = "w360dp-h780dp-xhdpi", fontScale = 1.15f)
+    fun composeScreensRenderCleanlyInCompactLightAndDarkModes() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val qaDir = (System.getProperty("qraft.qa.dir") ?: System.getenv("QRAFT_QA_DIR"))
+            ?.takeIf { it.isNotBlank() }?.let { File(it).apply { mkdirs() } }
+        fun savePng(name: String, bmp: Bitmap) {
+            qaDir ?: return
+            FileOutputStream(File(qaDir, name)).use { fos -> bmp.compress(Bitmap.CompressFormat.PNG, 95, fos) }
+        }
+
+        val starterItems = PresetCatalog.starterItems()
+        val studioDraft = StudioDraftState(
+            editingId = null,
+            title = "Studio Preview v4",
+            type = QrContentType.URL,
+            payload = QrPayloadFields(url = "https://qraft.studio"),
+            design = PresetCatalog.builtInPresets[9].design, // Frosted Studio (GLASS_CARD)
+            isFavorite = true
+        )
+
+        val darkModeState = androidx.compose.runtime.mutableStateOf(false)
+        val showStudioState = androidx.compose.runtime.mutableStateOf(false)
+
+        composeRule.setContent {
+            val isDark = darkModeState.value
+            val inStudio = showStudioState.value
+            QraftTheme(themeMode = if (isDark) ThemeMode.DARK else ThemeMode.LIGHT) {
+                if (!inStudio) {
+                    HomeScreen(
+                        creatorName = "Budi",
+                        themeMode = if (isDark) ThemeMode.DARK else ThemeMode.LIGHT,
+                        items = starterItems,
+                        selectedCategory = null,
+                        onSelectCategory = {},
+                        onCycleTheme = {},
+                        onOpenSettings = {},
+                        onOpenStudioNew = {},
+                        onOpenExisting = {},
+                        onQuickFullscreen = {},
+                        onToggleFavorite = {},
+                        onOpenLibrary = {},
+                        onOpenBatch = {},
+                        onOpenCreatePicker = {},
+                        onImportQr = {}
+                    )
+                } else {
+                    StudioScreen(
+                        draft = studioDraft,
+                        customPresets = emptyList(),
+                        scannability = ScannabilityReport(
+                            isScannable = true,
+                            decodedPreview = "https://qraft.studio",
+                            contrastRatio = 8.4,
+                            matrixSize = 25,
+                            effectiveEcc = "M"
+                        ),
+                        isVerifying = false,
+                        canUndo = true,
+                        canRedo = false,
+                        onBack = {},
+                        onTitleChange = {},
+                        onTypeChange = {},
+                        onFieldsChange = {},
+                        onDesignChange = {},
+                        onPickLogoPhoto = {},
+                        onPickBackgroundPhoto = {},
+                        onToggleFavorite = {},
+                        onApplyPreset = {},
+                        onSaveCustomPreset = {},
+                        onDeleteCustomPreset = {},
+                        onRandomizeStyle = {},
+                        onAutoFixScannability = {},
+                        onSaveToLibrary = {},
+                        onOpenExport = {},
+                        onOpenFullscreen = {}
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("Morning, Budi").assertIsDisplayed()
+        composeRule.onNodeWithText("Remix").assertIsDisplayed()
+        composeRule.onNodeWithText("Batch").assertIsDisplayed()
+        savePng("qa_home_light.png", composeRule.onRoot().captureToImage().asAndroidBitmap())
+
+        darkModeState.value = true
+        composeRule.waitForIdle()
+        savePng("qa_home_dark.png", composeRule.onRoot().captureToImage().asAndroidBitmap())
+
+        showStudioState.value = true
+        darkModeState.value = false
+        composeRule.waitForIdle()
+        composeRule.onAllNodesWithText("Studio Preview v4").onFirst().assertIsDisplayed()
+        savePng("qa_studio_light.png", composeRule.onRoot().captureToImage().asAndroidBitmap())
+
+        darkModeState.value = true
+        composeRule.waitForIdle()
+        savePng("qa_studio_dark.png", composeRule.onRoot().captureToImage().asAndroidBitmap())
+
+        // Also capture real high-res framed QR artwork and A4 300 DPI Print Sheet sample
+        if (qaDir != null) {
+            val frosted = QrEngine.renderFramedExportBitmap(
+                context = context,
+                data = "https://qraft.studio/v4",
+                design = PresetCatalog.builtInPresets[9].design,
+                targetWidthPx = 900
+            )
+            savePng("qa_frame_glass.png", frosted)
+            frosted.recycle()
+
+            val finder = QrEngine.renderFramedExportBitmap(
+                context = context,
+                data = "https://qraft.studio/v4",
+                design = PresetCatalog.builtInPresets[10].design,
+                targetWidthPx = 900
+            )
+            savePng("qa_frame_finder.png", finder)
+            finder.recycle()
+
+            val sheetItems = PresetCatalog.builtInPresets.take(6).mapIndexed { i, p ->
+                PrintSheetItem(title = p.name, payload = "https://qraft.studio/p/${i + 1}", design = p.design)
+            }
+            val sheetBmp = PrintSheetEngine.renderPrintSheetPageBitmap(
+                context = context,
+                items = sheetItems,
+                layout = PrintSheetLayout.STICKERS_3X4,
+                pageIndex = 0,
+                totalPages = 1,
+                sheetTitle = "Qraft v4.0 Visual QA Sheet"
+            )
+            val scaledSheet = Bitmap.createScaledBitmap(sheetBmp, 900, 1273, true)
+            savePng("qa_print_sheet.png", scaledSheet)
+            scaledSheet.recycle()
+            sheetBmp.recycle()
+        }
     }
 
     @Test

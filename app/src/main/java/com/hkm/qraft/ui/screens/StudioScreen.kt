@@ -124,12 +124,12 @@ fun StudioScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             QraftHeaderCircleButton(
                 icon = Icons.Rounded.ArrowBackIosNew,
                 contentDescription = "Back",
-                size = 40.dp,
+                size = 36.dp,
                 onClick = onBack
             )
 
@@ -146,7 +146,7 @@ fun StudioScreen(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "Studio • ${draft.type.shortCode} • ${draft.design.exportSizePx}px",
+                    text = "${draft.type.shortCode} • ${draft.design.exportSizePx}px",
                     style = MaterialTheme.typography.labelSmall,
                     color = colors.textSecondary,
                     maxLines = 1,
@@ -157,7 +157,7 @@ fun StudioScreen(
             QraftHeaderCircleButton(
                 icon = Icons.AutoMirrored.Rounded.Undo,
                 contentDescription = "Undo",
-                size = 38.dp,
+                size = 34.dp,
                 enabled = canUndo,
                 contentColor = if (canUndo) colors.textPrimary else colors.textTertiary,
                 modifier = Modifier.alpha(if (canUndo) 1f else 0.45f),
@@ -167,7 +167,7 @@ fun StudioScreen(
             QraftHeaderCircleButton(
                 icon = Icons.AutoMirrored.Rounded.Redo,
                 contentDescription = "Redo",
-                size = 38.dp,
+                size = 34.dp,
                 enabled = canRedo,
                 contentColor = if (canRedo) colors.textPrimary else colors.textTertiary,
                 modifier = Modifier.alpha(if (canRedo) 1f else 0.45f),
@@ -177,7 +177,7 @@ fun StudioScreen(
             QraftHeaderCircleButton(
                 icon = Icons.Rounded.Casino,
                 contentDescription = "Randomize style",
-                size = 38.dp,
+                size = 34.dp,
                 contentColor = colors.espressoAccent,
                 onClick = onRandomizeStyle
             )
@@ -185,7 +185,7 @@ fun StudioScreen(
             QraftHeaderCircleButton(
                 icon = if (draft.isFavorite) Icons.Rounded.Star else Icons.Rounded.StarOutline,
                 contentDescription = "Favorite",
-                size = 38.dp,
+                size = 34.dp,
                 contentColor = if (draft.isFavorite) colors.timelineDotActive else colors.textSecondary,
                 onClick = onToggleFavorite
             )
@@ -315,6 +315,7 @@ fun StudioScreen(
                     QrTelemetryGaugeRow(
                         charCount = draft.encodedPayload.length,
                         matrixSize = scannability.matrixSize,
+                        effectiveEcc = scannability.effectiveEcc,
                         contrastRatio = scannability.contrastRatio
                     )
                 }
@@ -530,8 +531,8 @@ private fun ScannabilityStatusPill(
         Text(
             text = when {
                 isVerifying -> "Checking…"
-                report.isScannable -> "Scannable ✓ • ${report.matrixSize}×${report.matrixSize} • ECC ${report.effectiveEcc}"
-                else -> "Low Scan Margin • Tap Fix"
+                report.isScannable -> "Scannable"
+                else -> "Low Scan • Fix"
             },
             style = MaterialTheme.typography.labelSmall,
             color = fg,
@@ -546,6 +547,7 @@ private fun ScannabilityStatusPill(
 private fun QrTelemetryGaugeRow(
     charCount: Int,
     matrixSize: Int,
+    effectiveEcc: String,
     contrastRatio: Double
 ) {
     val colors = QraftThemeTokens.colors
@@ -567,10 +569,10 @@ private fun QrTelemetryGaugeRow(
             .background(colors.surfaceMuted.copy(alpha = 0.72f))
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text(
-            text = "$charCount chars • ${matrixSize}×$matrixSize",
+            text = "$charCount ch • ${matrixSize}×$matrixSize • $effectiveEcc",
             style = MaterialTheme.typography.labelSmall,
             color = colors.textSecondary
         )
