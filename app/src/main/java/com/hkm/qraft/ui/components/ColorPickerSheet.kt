@@ -8,8 +8,10 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -93,17 +95,17 @@ fun ColorPickerModalSheet(
         }
     }
 
-    ModalBottomSheet(
+    QraftModalSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        maxHeightFraction = 0.90f,
+        hardCap = 720.dp,
         containerColor = colors.surface,
-        dragHandle = { BottomSheetDefaults.DragHandle(color = colors.textTertiary.copy(alpha = 0.45f)) }
-    ) {
+        contentColor = colors.textPrimary
+    ) { dismissSheet ->
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .navigationBarsPadding()
-                .imePadding()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -376,7 +378,7 @@ fun ColorPickerModalSheet(
                     onClick = {
                         ColorSwatches.recordRecent(currentColor)
                         onColorSelected(currentColor)
-                        onDismiss()
+                        dismissSheet()
                     }
                 )
             }

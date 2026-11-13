@@ -1,5 +1,7 @@
 package com.hkm.qraft.ui.components
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,11 +24,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -284,6 +291,59 @@ fun QraftResolutionSelector(
                         maxLines = 1
                     )
                 }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun QraftSegmentedPicker(
+    options: List<String>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = QraftThemeTokens.colors
+    SingleChoiceSegmentedButtonRow(modifier = modifier.fillMaxWidth()) {
+        options.forEachIndexed { index, label ->
+            val selected = index == selectedIndex
+            val container by animateColorAsState(
+                targetValue = if (selected) colors.activePillBg else colors.surface,
+                animationSpec = tween(180, easing = QraftParallaxEasing),
+                label = "qraft_seg_bg_$index"
+            )
+            val foreground by animateColorAsState(
+                targetValue = if (selected) colors.activePillContent else colors.textPrimary,
+                animationSpec = tween(180, easing = QraftParallaxEasing),
+                label = "qraft_seg_fg_$index"
+            )
+            val outline by animateColorAsState(
+                targetValue = if (selected) colors.activePillBg else colors.cardBorder,
+                animationSpec = tween(180, easing = QraftParallaxEasing),
+                label = "qraft_seg_outline_$index"
+            )
+            SegmentedButton(
+                selected = selected,
+                onClick = { if (!selected) onSelect(index) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                colors = SegmentedButtonDefaults.colors(
+                    activeContainerColor = container,
+                    inactiveContainerColor = container,
+                    activeContentColor = foreground,
+                    inactiveContentColor = foreground,
+                    activeBorderColor = outline,
+                    inactiveBorderColor = outline
+                ),
+                border = BorderStroke(1.dp, outline)
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }

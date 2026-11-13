@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Label
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -94,67 +95,92 @@ fun PresetsEditorTab(
 
         if (customPresets.isNotEmpty() && selectedCategory == PresetCategory.ALL) {
             SectionLabel("Your Saved Styles")
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                customPresets.forEach { preset ->
-                    PresetRowCard(
-                        preset = preset,
-                        isSelected = preset.design == currentDesign,
-                        onSelect = { onApplyPreset(preset) },
-                        onDelete = { onDeleteCustomPreset(preset.id) }
-                    )
-                }
+            FlowGrid(items = customPresets, columns = 2) { preset ->
+                PresetGridCard(
+                    preset = preset,
+                    isSelected = preset.design == currentDesign,
+                    onSelect = { onApplyPreset(preset) },
+                    onDelete = { onDeleteCustomPreset(preset.id) }
+                )
             }
         }
 
         SectionLabel(if (selectedCategory == PresetCategory.ALL) "Curated Studio Templates" else selectedCategory.label)
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            filteredBuiltIns.forEach { preset ->
-                PresetRowCard(
-                    preset = preset,
-                    isSelected = preset.design == currentDesign,
-                    onSelect = { onApplyPreset(preset) },
-                    onDelete = null
-                )
-            }
+        FlowGrid(items = filteredBuiltIns, columns = 2) { preset ->
+            PresetGridCard(
+                preset = preset,
+                isSelected = preset.design == currentDesign,
+                onSelect = { onApplyPreset(preset) },
+                onDelete = null
+            )
         }
     }
 
     if (showSaveDialog) {
         var name by remember { mutableStateOf("") }
-        AlertDialog(
+        QraftModalSheet(
             onDismissRequest = { showSaveDialog = false },
+            maxHeightFraction = 0.65f,
+            hardCap = 420.dp,
             containerColor = colors.surface,
-            title = { Text("Save Custom Style", color = colors.textPrimary) },
-            text = {
+            contentColor = colors.textPrimary
+        ) { dismissSheet ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Save Custom Style",
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = colors.textPrimary
+                    )
+                    Text(
+                        text = "Save your colors, shapes, eye geometry, logo & frame as a reusable Studio template.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textSecondary
+                    )
+                }
                 QraftTextField(
                     value = name,
                     onValueChange = { name = it },
                     label = "Preset Name",
-                    placeholder = "e.g. Brand Coral Badge"
+                    placeholder = "e.g. Monochrome Emerald",
+                    leadingIcon = Icons.Rounded.AutoAwesome
                 )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        onSaveCurrentAsPreset(name.trim().ifBlank { "My Custom Look" })
-                        showSaveDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = colors.espressoAccent)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text("Save")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showSaveDialog = false }) {
-                    Text("Cancel", color = colors.textSecondary)
+                    QraftPillButton(
+                        text = "Cancel",
+                        variant = QraftButtonVariant.SECONDARY,
+                        height = 46.dp,
+                        modifier = Modifier.weight(1f),
+                        onClick = dismissSheet
+                    )
+                    QraftPillButton(
+                        text = "Save Style",
+                        variant = QraftButtonVariant.PRIMARY,
+                        leadingIcon = Icons.Rounded.Check,
+                        height = 46.dp,
+                        modifier = Modifier.weight(1.3f),
+                        onClick = {
+                            onSaveCurrentAsPreset(name.trim().ifBlank { "My Custom Look" })
+                            dismissSheet()
+                        }
+                    )
                 }
             }
-        )
+        }
     }
 }
 
 private object MiniQrThumbnailCache {
-    private val cache = android.util.LruCache<String, android.graphics.Bitmap>(32)
+    private val cache = android.util.LruCache<String, android.graphics.Bitmap>(48)
     fun get(key: String): android.graphics.Bitmap? = cache.get(key)
     fun put(key: String, bitmap: android.graphics.Bitmap) {
         if (cache.get(key) == null) {
@@ -164,7 +190,7 @@ private object MiniQrThumbnailCache {
 }
 
 @Composable
-private fun PresetRowCard(
+private fun PresetGridCard(
     preset: SavedStylePreset,
     isSelected: Boolean,
     onSelect: () -> Unit,
@@ -188,12 +214,14 @@ private fun PresetRowCard(
                 } else {
                     preset.design
                 }
-                QrEngine.renderQrCoreBitmap(
-                    context = context,
-                    data = "https://qraft.studio",
-                    design = safeDesign.copy(quietZonePadding = 0.06f),
-                    sizePx = 136
-                ).also { MiniQrThumbnailCache.put(preset.id, it) }
+                runCatching {
+                    QrEngine.renderQrCoreBitmap(
+                        context = context,
+                        data = "https://qraft.studio",
+                        design = safeDesign.copy(quietZonePadding = 0.06f),
+                        sizePx = 156
+                    )
+                }.getOrNull()?.also { MiniQrThumbnailCache.put(preset.id, it) }
             }
         }
     }
@@ -209,54 +237,110 @@ private fun PresetRowCard(
             .fillMaxWidth()
             .appleBounceClick { onSelect() }
     ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        Column(
+            modifier = Modifier.padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Box(
                 modifier = Modifier
-                    .size(54.dp)
+                    .fillMaxWidth()
+                    .height(104.dp)
                     .clip(RoundedCornerShape(14.dp))
-                    .background(Color(preset.design.background.brush.primaryColor))
+                    .background(
+                        if (preset.design.outerFrame.style != OuterFrameStyle.NONE) {
+                            Color(preset.design.outerFrame.frameFillColor)
+                        } else {
+                            Color(preset.design.background.brush.primaryColor)
+                        }
+                    )
                     .border(1.dp, colors.cardBorder, RoundedCornerShape(14.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                val bmp = thumbnail
-                if (bmp != null) {
-                    androidx.compose.foundation.Image(
-                        bitmap = bmp.asImageBitmap(),
-                        contentDescription = "${preset.name} live QR preview",
-                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    Canvas(modifier = Modifier.size(30.dp)) {
-                        val brush = QrEngine.buildComposeBrush(preset.design.darkBrush, size.minDimension)
-                        drawCircle(brush = brush, radius = size.minDimension * 0.24f, center = Offset(size.width * 0.30f, size.height * 0.30f))
-                        drawCircle(brush = brush, radius = size.minDimension * 0.24f, center = Offset(size.width * 0.72f, size.height * 0.30f))
-                        drawCircle(brush = brush, radius = size.minDimension * 0.24f, center = Offset(size.width * 0.30f, size.height * 0.72f))
+                Box(
+                    modifier = Modifier
+                        .size(76.dp)
+                        .clip(RoundedCornerShape(10.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val bmp = thumbnail
+                    if (bmp != null) {
+                        androidx.compose.foundation.Image(
+                            bitmap = bmp.asImageBitmap(),
+                            contentDescription = "${preset.name} live QR preview",
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Canvas(modifier = Modifier.size(34.dp)) {
+                            val brush = QrEngine.buildComposeBrush(preset.design.darkBrush, size.minDimension)
+                            drawCircle(brush = brush, radius = size.minDimension * 0.24f, center = Offset(size.width * 0.30f, size.height * 0.30f))
+                            drawCircle(brush = brush, radius = size.minDimension * 0.24f, center = Offset(size.width * 0.72f, size.height * 0.30f))
+                            drawCircle(brush = brush, radius = size.minDimension * 0.24f, center = Offset(size.width * 0.30f, size.height * 0.72f))
+                        }
+                    }
+                }
+
+                if (isSelected) {
+                    Surface(
+                        shape = CircleShape,
+                        color = colors.activePillBg,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(6.dp)
+                            .size(22.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Rounded.Check,
+                                contentDescription = null,
+                                tint = colors.activePillContent,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                } else if (onDelete != null) {
+                    Surface(
+                        shape = CircleShape,
+                        color = colors.surface.copy(alpha = 0.92f),
+                        border = BorderStroke(1.dp, colors.cardBorder),
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(6.dp)
+                            .size(24.dp)
+                            .appleBounceClick { onDelete() }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Rounded.DeleteOutline,
+                                contentDescription = "Delete preset",
+                                tint = colors.textSecondary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
                     }
                 }
             }
 
-            Column(modifier = Modifier.weight(1f)) {
-                Text(preset.name, style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.Start
+            ) {
                 Text(
-                    preset.subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = preset.name,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = preset.subtitle,
+                    style = MaterialTheme.typography.bodySmall,
                     color = colors.textSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-            }
-
-            if (onDelete != null) {
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete preset", tint = colors.textTertiary)
-                }
-            } else if (isSelected) {
-                Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = colors.espressoAccent)
             }
         }
     }
@@ -662,7 +746,10 @@ fun ColorsEditorTab(
                                 photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                             },
                             shape = RoundedCornerShape(50),
-                            colors = ButtonDefaults.buttonColors(containerColor = colors.espressoAccent),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = colors.espressoAccent,
+                                contentColor = colors.espressoAccentContent
+                            ),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Icon(Icons.Rounded.Image, contentDescription = null)
@@ -942,7 +1029,10 @@ fun LogoEditorTab(
                         logoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                     },
                     shape = RoundedCornerShape(50),
-                    colors = ButtonDefaults.buttonColors(containerColor = colors.espressoAccent),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colors.espressoAccent,
+                        contentColor = colors.espressoAccentContent
+                    ),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(Icons.Rounded.AddPhotoAlternate, contentDescription = null)
@@ -977,7 +1067,7 @@ fun LogoEditorTab(
                         Icon(
                             imageVector = choice.icon,
                             contentDescription = choice.label,
-                            tint = if (selected) colors.activePillContent else Color(logo.iconTintColor),
+                            tint = if (selected) colors.activePillContent else colors.textPrimary,
                             modifier = Modifier.size(24.dp)
                         )
                     }
@@ -1652,7 +1742,7 @@ fun BarcodeEditorPanel(
                     onValueChange = { onSpecChange(spec.copy(caption = it.take(30))) },
                     label = "Optional Header Caption",
                     placeholder = "e.g. SKU / INVENTORY TAG",
-                    leadingIcon = Icons.Rounded.Label
+                    leadingIcon = Icons.AutoMirrored.Rounded.Label
                 )
                 Spacer(Modifier.height(8.dp))
                 ColorSwatchRow(

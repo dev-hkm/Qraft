@@ -1002,6 +1002,42 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun toggleItemArchived(id: String) {
+        viewModelScope.launch {
+            val target = savedItems.value.firstOrNull { it.id == id }
+            repository.toggleArchived(id)
+            _statusBanner.tryEmit(
+                if (target?.isArchived == true) "Restored from Archive" else "Moved to Archive"
+            )
+        }
+    }
+
+    fun bulkSetArchived(ids: Set<String>, archived: Boolean) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            repository.setArchivedForItems(ids, archived)
+            _statusBanner.tryEmit(
+                if (archived) "Archived ${ids.size} items" else "Restored ${ids.size} items"
+            )
+        }
+    }
+
+    fun renameItem(id: String, newTitle: String) {
+        val cleaned = newTitle.trim()
+        if (cleaned.isBlank()) return
+        viewModelScope.launch {
+            repository.renameItem(id, cleaned)
+            _statusBanner.tryEmit("Renamed to \"$cleaned\"")
+        }
+    }
+
+    fun updateItemOrganization(id: String, folder: String?, tags: List<String>) {
+        viewModelScope.launch {
+            repository.updateItemOrganization(id, folder, tags)
+            _statusBanner.tryEmit("Updated folder & tags")
+        }
+    }
+
     fun bulkDeleteItems(ids: Set<String>) {
         if (ids.isEmpty()) return
         viewModelScope.launch {

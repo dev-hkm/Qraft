@@ -384,10 +384,21 @@ data class QrCreationItem(
     val createdAtMillis: Long = System.currentTimeMillis(),
     val updatedAtMillis: Long = System.currentTimeMillis(),
     val codeKind: CodeKind? = null,
-    val barcode: BarcodeDesignSpec? = null
+    val barcode: BarcodeDesignSpec? = null,
+    val folder: String? = null,
+    val tags: List<String>? = null,
+    val isArchived: Boolean = false
 ) {
     fun resolvedCodeKind(): CodeKind = codeKind ?: CodeKind.QR
-    fun resolvedBarcode(): BarcodeDesignSpec = barcode ?: BarcodeDesignSpec()
+    fun resolvedBarcode(): BarcodeDesignSpec = barcode?.sanitized() ?: BarcodeDesignSpec()
+    fun resolvedFolder(): String = (folder as String?)?.trim().orEmpty()
+    @Suppress("UNCHECKED_CAST")
+    fun resolvedTags(): List<String> = (tags as? List<String>)
+        ?.filterNotNull()
+        ?.map { it.trim() }
+        ?.filter { it.isNotBlank() }
+        ?.distinct()
+        .orEmpty()
 }
 
 enum class PresetCategory(val label: String) {
@@ -431,4 +442,208 @@ data class ScannabilityReport(
     val effectiveEcc: String = "M",
     val contrastRatio: Double = 21.0,
     val warningMessage: String? = null
+)
+
+/**
+ * Defensive post-deserialization sanitizers.
+ * Gson can bypass Kotlin default values and leave non-null fields/enums as null at runtime
+ * when loading JSON saved by older app versions or imported backup files.
+ */
+@Suppress("UNNECESSARY_SAFE_CALL", "USELESS_ELVIS")
+private inline fun <T : Any> T?.orDefault(default: T): T = this ?: default
+
+@Suppress("UNNECESSARY_SAFE_CALL", "USELESS_ELVIS")
+private fun String?.orEmptySafe(fallback: String = ""): String = this ?: fallback
+
+@Suppress("UNNECESSARY_SAFE_CALL", "USELESS_ELVIS")
+fun QrPayloadFields?.sanitized(): QrPayloadFields {
+    val src = this ?: return QrPayloadFields()
+    return QrPayloadFields(
+        url = src.url.orEmptySafe("https://qraft.studio"),
+        text = src.text.orEmptySafe(),
+        wifiSsid = src.wifiSsid.orEmptySafe(),
+        wifiPassword = src.wifiPassword.orEmptySafe(),
+        wifiSecurity = src.wifiSecurity.orDefault(WifiSecurity.WPA),
+        wifiHidden = src.wifiHidden,
+        firstName = src.firstName.orEmptySafe(),
+        lastName = src.lastName.orEmptySafe(),
+        organization = src.organization.orEmptySafe(),
+        jobTitle = src.jobTitle.orEmptySafe(),
+        phone = src.phone.orEmptySafe(),
+        email = src.email.orEmptySafe(),
+        website = src.website.orEmptySafe(),
+        street = src.street.orEmptySafe(),
+        city = src.city.orEmptySafe(),
+        country = src.country.orEmptySafe(),
+        note = src.note.orEmptySafe(),
+        emailTo = src.emailTo.orEmptySafe(),
+        emailSubject = src.emailSubject.orEmptySafe(),
+        emailBody = src.emailBody.orEmptySafe(),
+        phoneNumber = src.phoneNumber.orEmptySafe(),
+        smsNumber = src.smsNumber.orEmptySafe(),
+        smsMessage = src.smsMessage.orEmptySafe(),
+        latitude = src.latitude.orEmptySafe("10.7769"),
+        longitude = src.longitude.orEmptySafe("106.7009"),
+        geoLabel = src.geoLabel.orEmptySafe(),
+        eventTitle = src.eventTitle.orEmptySafe(),
+        eventLocation = src.eventLocation.orEmptySafe(),
+        eventStart = src.eventStart.orEmptySafe("20261115T090000"),
+        eventEnd = src.eventEnd.orEmptySafe("20261115T103000"),
+        eventDescription = src.eventDescription.orEmptySafe(),
+        socialPlatform = src.socialPlatform.orDefault(SocialPlatform.INSTAGRAM),
+        socialHandle = src.socialHandle.orEmptySafe(),
+        paymentMethod = src.paymentMethod.orDefault(PaymentMethod.PAYPAL),
+        paymentTarget = src.paymentTarget.orEmptySafe(),
+        paymentAmount = src.paymentAmount.orEmptySafe(),
+        paymentNote = src.paymentNote.orEmptySafe(),
+        appPlatform = src.appPlatform.orDefault(AppPlatform.GOOGLE_PLAY),
+        appTarget = src.appTarget.orEmptySafe()
+    )
+}
+
+@Suppress("UNNECESSARY_SAFE_CALL", "USELESS_ELVIS")
+fun BrushStyleConfig?.sanitized(defaultPrimary: Long = 0xFF111113): BrushStyleConfig {
+    val src = this ?: return BrushStyleConfig(primaryColor = defaultPrimary)
+    return BrushStyleConfig(
+        mode = src.mode.orDefault(BrushMode.SOLID),
+        primaryColor = src.primaryColor,
+        secondaryColor = src.secondaryColor,
+        tertiaryColor = src.tertiaryColor,
+        direction = src.direction.orDefault(GradientDirection.TOP_LEFT_TO_BOTTOM_RIGHT),
+        angleDegrees = if (src.angleDegrees.isFinite()) src.angleDegrees else 45f
+    )
+}
+
+@Suppress("UNNECESSARY_SAFE_CALL", "USELESS_ELVIS")
+fun BackgroundStyleConfig?.sanitized(): BackgroundStyleConfig {
+    val src = this ?: return BackgroundStyleConfig()
+    return BackgroundStyleConfig(
+        mode = src.mode.orDefault(BackgroundMode.SOLID),
+        brush = src.brush.sanitized(defaultPrimary = 0xFFFFFFFF),
+        photoUri = src.photoUri,
+        photoOverlayAlpha = src.photoOverlayAlpha.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 0.72f,
+        photoOverlayColor = src.photoOverlayColor
+    )
+}
+
+@Suppress("UNNECESSARY_SAFE_CALL", "USELESS_ELVIS")
+fun LogoStyleConfig?.sanitized(): LogoStyleConfig {
+    val src = this ?: return LogoStyleConfig()
+    return LogoStyleConfig(
+        sourceType = src.sourceType.orDefault(LogoSourceType.NONE),
+        galleryUri = src.galleryUri,
+        iconKey = src.iconKey.orEmptySafe("qr"),
+        emoji = src.emoji.orEmptySafe("✦"),
+        monogramText = src.monogramText.orEmptySafe("QR"),
+        monogramBgColor = src.monogramBgColor,
+        monogramTextColor = src.monogramTextColor,
+        sizeFraction = src.sizeFraction.takeIf { it.isFinite() }?.coerceIn(0.10f, 0.36f) ?: 0.22f,
+        clipShape = src.clipShape.orDefault(LogoClipShape.CIRCLE),
+        paddingStyle = src.paddingStyle.orDefault(LogoPaddingStyle.NATURAL),
+        paddingFraction = src.paddingFraction.takeIf { it.isFinite() }?.coerceIn(0f, 0.35f) ?: 0.14f,
+        backingEnabled = src.backingEnabled,
+        backingColor = src.backingColor,
+        borderEnabled = src.borderEnabled,
+        borderColor = src.borderColor,
+        iconTintColor = src.iconTintColor,
+        rotationDeg = src.rotationDeg?.takeIf { it.isFinite() },
+        borderWidthFraction = src.borderWidthFraction?.takeIf { it.isFinite() }
+    )
+}
+
+@Suppress("UNNECESSARY_SAFE_CALL", "USELESS_ELVIS")
+fun OuterFrameConfig?.sanitized(): OuterFrameConfig {
+    val src = this ?: return OuterFrameConfig()
+    return OuterFrameConfig(
+        style = src.style.orDefault(OuterFrameStyle.NONE),
+        label = src.label.orEmptySafe("SCAN ME"),
+        subtitle = src.subtitle.orEmptySafe(),
+        frameFillColor = src.frameFillColor,
+        accentColor = src.accentColor,
+        accentSecondaryColor = src.accentSecondaryColor,
+        textColor = src.textColor,
+        cornerRadiusDp = src.cornerRadiusDp.takeIf { it.isFinite() }?.coerceIn(0f, 64f) ?: 26f,
+        borderThicknessDp = src.borderThicknessDp.takeIf { it.isFinite() }?.coerceIn(0f, 24f) ?: 0f,
+        framePaddingFraction = src.framePaddingFraction?.takeIf { it.isFinite() }
+    )
+}
+
+@Suppress("UNNECESSARY_SAFE_CALL", "USELESS_ELVIS")
+fun QrDesignSpec?.sanitized(): QrDesignSpec {
+    val src = this ?: return QrDesignSpec()
+    return QrDesignSpec(
+        pixelStyle = src.pixelStyle.orDefault(QrPixelStyle.ROUNDED),
+        pixelCornerRoundness = src.pixelCornerRoundness.takeIf { it.isFinite() }?.coerceIn(0f, 0.5f) ?: 0.42f,
+        pixelSizeFactor = src.pixelSizeFactor.takeIf { it.isFinite() }?.coerceIn(0.35f, 1.0f) ?: 0.92f,
+        lightPixelStyle = src.lightPixelStyle.orDefault(QrLightPixelStyle.NONE),
+        lightPixelColor = src.lightPixelColor,
+        eyeFrameStyle = src.eyeFrameStyle.orDefault(QrEyeFrameStyle.ROUNDED),
+        eyeFrameRoundness = src.eyeFrameRoundness.takeIf { it.isFinite() }?.coerceIn(0f, 0.5f) ?: 0.30f,
+        eyeBallStyle = src.eyeBallStyle.orDefault(QrEyeBallStyle.CIRCLE),
+        eyeBallRoundness = src.eyeBallRoundness.takeIf { it.isFinite() }?.coerceIn(0f, 0.5f) ?: 0.35f,
+        codeSilhouette = src.codeSilhouette.orDefault(QrCodeSilhouette.SQUARE),
+        fourthEyeEnabled = src.fourthEyeEnabled,
+        darkBrush = src.darkBrush.sanitized(),
+        customEyeFrameColors = src.customEyeFrameColors,
+        eyeFrameBrush = src.eyeFrameBrush.sanitized(),
+        customEyeBallColors = src.customEyeBallColors,
+        eyeBallBrush = src.eyeBallBrush.sanitized(),
+        background = src.background.sanitized(),
+        logo = src.logo.sanitized(),
+        outerFrame = src.outerFrame.sanitized(),
+        ecc = src.ecc.orDefault(QrEccSetting.AUTO),
+        quietZonePadding = src.quietZonePadding.takeIf { it.isFinite() }?.coerceIn(0.02f, 0.30f) ?: 0.10f,
+        exportSizePx = src.exportSizePx.coerceIn(512, 8192),
+        matrixShadowEnabled = src.matrixShadowEnabled
+    )
+}
+
+@Suppress("UNNECESSARY_SAFE_CALL", "USELESS_ELVIS")
+fun BarcodeDesignSpec?.sanitized(): BarcodeDesignSpec {
+    val src = this ?: return BarcodeDesignSpec()
+    return BarcodeDesignSpec(
+        format = src.format.orDefault(BarcodeFormatType.CODE_128),
+        data = src.data.orEmptySafe("QRAFT-PRO-2026"),
+        foregroundColor = src.foregroundColor,
+        backgroundColor = src.backgroundColor,
+        transparentBg = src.transparentBg,
+        roundedBars = src.roundedBars,
+        showText = src.showText,
+        caption = src.caption.orEmptySafe(),
+        quietMarginFraction = src.quietMarginFraction.takeIf { it.isFinite() }?.coerceIn(0.02f, 0.25f) ?: 0.08f,
+        framed = src.framed,
+        frameFillColor = src.frameFillColor,
+        frameAccentColor = src.frameAccentColor,
+        frameTextColor = src.frameTextColor,
+        cornerRadiusDp = src.cornerRadiusDp.takeIf { it.isFinite() }?.coerceIn(0f, 64f) ?: 24f,
+        exportWidthPx = src.exportWidthPx.coerceIn(512, 8192)
+    )
+}
+
+@Suppress("UNNECESSARY_SAFE_CALL", "USELESS_ELVIS", "UNCHECKED_CAST")
+fun QrCreationItem.sanitized(): QrCreationItem = QrCreationItem(
+    id = id.orEmptySafe(UUID.randomUUID().toString()),
+    title = title.orEmptySafe("Qraft Code"),
+    type = type.orDefault(QrContentType.URL),
+    payload = payload.sanitized(),
+    design = design.sanitized(),
+    isFavorite = isFavorite,
+    isVerifiedScannable = isVerifiedScannable,
+    createdAtMillis = createdAtMillis,
+    updatedAtMillis = updatedAtMillis,
+    codeKind = codeKind ?: CodeKind.QR,
+    barcode = barcode?.sanitized(),
+    folder = (folder as String?)?.trim()?.takeIf { it.isNotEmpty() },
+    tags = (tags as? List<String>)?.filterNotNull()?.map { it.trim() }?.filter { it.isNotBlank() }?.distinct(),
+    isArchived = isArchived
+)
+
+@Suppress("UNNECESSARY_SAFE_CALL", "USELESS_ELVIS")
+fun SavedStylePreset.sanitized(): SavedStylePreset = SavedStylePreset(
+    id = id.orEmptySafe(UUID.randomUUID().toString()),
+    name = name.orEmptySafe("Custom Preset"),
+    subtitle = subtitle.orEmptySafe("Saved style"),
+    design = design.sanitized(),
+    isBuiltIn = isBuiltIn,
+    category = category ?: PresetCategory.MONOCHROME
 )

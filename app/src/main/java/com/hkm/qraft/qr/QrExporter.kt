@@ -149,7 +149,7 @@ object QrExporter {
             }
             ExportResult(true, "Opened share sheet", shareUri)
         }.getOrElse { err ->
-            ExportResult(false, "Share failed: ${err.localizedMessage ?: "unknown error"}")
+            ExportResult(false, "Share failed: ${err.localizedMessage ?: "no share app available"}")
         }
     }
 
@@ -259,7 +259,7 @@ object QrExporter {
             }
             ExportResult(true, "Opened share sheet", shareUri)
         }.getOrElse { err ->
-            ExportResult(false, "Share failed: ${err.localizedMessage ?: "unknown error"}")
+            ExportResult(false, "Share failed: ${err.localizedMessage ?: "no share app available"}")
         }
     }
 
@@ -541,8 +541,17 @@ object QrExporter {
             }
             val resolver = context.contentResolver
             val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return null
-            resolver.openOutputStream(uri)?.use { os ->
-                bitmap.compress(compressFormatFor(format), 96, os)
+            val wrote = try {
+                resolver.openOutputStream(uri)?.use { os ->
+                    bitmap.compress(compressFormatFor(format), 96, os)
+                } == true
+            } catch (t: Throwable) {
+                runCatching { resolver.delete(uri, null, null) }
+                throw t
+            }
+            if (!wrote) {
+                runCatching { resolver.delete(uri, null, null) }
+                return null
             }
             values.clear()
             values.put(MediaStore.Images.Media.IS_PENDING, 0)
@@ -576,7 +585,16 @@ object QrExporter {
             }
             val resolver = context.contentResolver
             val uri = resolver.insert(MediaStore.Files.getContentUri("external"), values) ?: return null
-            resolver.openOutputStream(uri)?.use { os -> os.write(bytes) }
+            try {
+                resolver.openOutputStream(uri)?.use { os -> os.write(bytes) }
+                    ?: run {
+                        runCatching { resolver.delete(uri, null, null) }
+                        return null
+                    }
+            } catch (t: Throwable) {
+                runCatching { resolver.delete(uri, null, null) }
+                throw t
+            }
             values.clear()
             values.put(MediaStore.Files.FileColumns.IS_PENDING, 0)
             resolver.update(uri, values, null, null)

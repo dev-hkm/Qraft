@@ -13,6 +13,7 @@ import com.hkm.qraft.model.ExportImageFormat
 import com.hkm.qraft.model.QrCreationItem
 import com.hkm.qraft.model.SavedStylePreset
 import com.hkm.qraft.model.ThemeMode
+import com.hkm.qraft.model.sanitized
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -51,7 +52,7 @@ class QraftRepository(private val context: Context) {
         } else {
             runCatching {
                 val type = object : TypeToken<List<QrCreationItem>>() {}.type
-                gson.fromJson<List<QrCreationItem>>(json, type) ?: emptyList()
+                gson.fromJson<List<QrCreationItem>>(json, type)?.filterNotNull()?.map { it.sanitized() } ?: emptyList()
             }.getOrElse { emptyList() }
         }
     }
@@ -63,7 +64,7 @@ class QraftRepository(private val context: Context) {
         } else {
             runCatching {
                 val type = object : TypeToken<List<SavedStylePreset>>() {}.type
-                gson.fromJson<List<SavedStylePreset>>(json, type) ?: emptyList()
+                gson.fromJson<List<SavedStylePreset>>(json, type)?.filterNotNull()?.map { it.sanitized() } ?: emptyList()
             }.getOrElse { emptyList() }
         }
     }
@@ -116,13 +117,56 @@ class QraftRepository(private val context: Context) {
         }
     }
 
-    suspend fun toggleFavorite(id: String) {
+    private suspend fun mutateItems(transform: (List<QrCreationItem>) -> List<QrCreationItem>) {
         context.qraftDataStore.edit { prefs ->
-            val current = decodeItems(prefs[Keys.ITEMS_JSON], prefs[Keys.SEEDED] == true).map {
-                if (it.id == id) it.copy(isFavorite = !it.isFavorite) else it
-            }
+            val current = decodeItems(prefs[Keys.ITEMS_JSON], prefs[Keys.SEEDED] == true)
             prefs[Keys.SEEDED] = true
-            prefs[Keys.ITEMS_JSON] = gson.toJson(current)
+            prefs[Keys.ITEMS_JSON] = gson.toJson(transform(current))
+        }
+    }
+
+    suspend fun toggleFavorite(id: String) {
+        mutateItems { items ->
+            items.map { if (it.id == id) it.copy(isFavorite = !it.isFavorite) else it }
+        }
+    }
+
+    suspend fun toggleArchived(id: String) {
+        val now = System.currentTimeMillis()
+        mutateItems { items ->
+            items.map { if (it.id == id) it.copy(isArchived = !it.isArchived, updatedAtMillis = now) else it }
+        }
+    }
+
+    suspend fun setArchivedForItems(ids: Set<String>, archived: Boolean) {
+        if (ids.isEmpty()) return
+        val now = System.currentTimeMillis()
+        mutateItems { items ->
+            items.map { if (it.id in ids) it.copy(isArchived = archived, updatedAtMillis = now) else it }
+        }
+    }
+
+    suspend fun renameItem(id: String, newTitle: String) {
+        val cleaned = newTitle.trim()
+        if (cleaned.isBlank()) return
+        val now = System.currentTimeMillis()
+        mutateItems { items ->
+            items.map { if (it.id == id) it.copy(title = cleaned, updatedAtMillis = now) else it }
+        }
+    }
+
+    suspend fun updateItemOrganization(id: String, folder: String?, tags: List<String>) {
+        val now = System.currentTimeMillis()
+        val cleanFolder = folder?.trim()?.takeIf { it.isNotEmpty() }
+        val cleanTags = tags.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        mutateItems { items ->
+            items.map {
+                if (it.id == id) it.copy(
+                    folder = cleanFolder,
+                    tags = cleanTags.takeIf { list -> list.isNotEmpty() },
+                    updatedAtMillis = now
+                ) else it
+            }
         }
     }
 
@@ -132,22 +176,13 @@ class QraftRepository(private val context: Context) {
 
     suspend fun deleteItems(ids: Set<String>) {
         if (ids.isEmpty()) return
-        context.qraftDataStore.edit { prefs ->
-            val current = decodeItems(prefs[Keys.ITEMS_JSON], prefs[Keys.SEEDED] == true)
-                .filterNot { it.id in ids }
-            prefs[Keys.SEEDED] = true
-            prefs[Keys.ITEMS_JSON] = gson.toJson(current)
-        }
+        mutateItems { items -> items.filterNot { it.id in ids } }
     }
 
     suspend fun setFavoriteForItems(ids: Set<String>, favorite: Boolean) {
         if (ids.isEmpty()) return
-        context.qraftDataStore.edit { prefs ->
-            val current = decodeItems(prefs[Keys.ITEMS_JSON], prefs[Keys.SEEDED] == true).map {
-                if (it.id in ids) it.copy(isFavorite = favorite) else it
-            }
-            prefs[Keys.SEEDED] = true
-            prefs[Keys.ITEMS_JSON] = gson.toJson(current)
+        mutateItems { items ->
+            items.map { if (it.id in ids) it.copy(isFavorite = favorite) else it }
         }
     }
 
@@ -199,7 +234,7 @@ class QraftRepository(private val context: Context) {
         if (json.isNullOrBlank()) return emptyList()
         return runCatching {
             val type = object : TypeToken<List<QrCreationItem>>() {}.type
-            gson.fromJson<List<QrCreationItem>>(json, type) ?: emptyList()
+            gson.fromJson<List<QrCreationItem>>(json, type)?.filterNotNull()?.map { it.sanitized() } ?: emptyList()
         }.getOrElse { emptyList() }
     }
 
@@ -207,7 +242,7 @@ class QraftRepository(private val context: Context) {
         if (json.isNullOrBlank()) return emptyList()
         return runCatching {
             val type = object : TypeToken<List<SavedStylePreset>>() {}.type
-            gson.fromJson<List<SavedStylePreset>>(json, type) ?: emptyList()
+            gson.fromJson<List<SavedStylePreset>>(json, type)?.filterNotNull()?.map { it.sanitized() } ?: emptyList()
         }.getOrElse { emptyList() }
     }
 }

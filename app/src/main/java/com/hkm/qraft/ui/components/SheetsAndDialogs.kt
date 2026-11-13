@@ -49,17 +49,16 @@ fun CreateQrTypeSheet(
     onOpenScanner: (() -> Unit)? = null
 ) {
     val colors = QraftThemeTokens.colors
-    ModalBottomSheet(
+    QraftModalSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        maxHeightFraction = 0.88f,
+        hardCap = 740.dp,
         containerColor = colors.surface,
-        dragHandle = { BottomSheetDefaults.DragHandle(color = colors.textTertiary.copy(alpha = 0.45f)) }
-    ) {
+        contentColor = colors.textPrimary
+    ) { _ ->
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .navigationBarsPadding()
-                .imePadding()
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -305,17 +304,16 @@ fun ExportQrSheet(
     var printLayout by remember { mutableStateOf(PrintSheetLayout.STICKERS_3X4) }
     val activeWidthPx = if (codeKind == CodeKind.BARCODE) (barcodeSpec?.exportWidthPx ?: design.exportSizePx) else design.exportSizePx
 
-    ModalBottomSheet(
+    QraftModalSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        maxHeightFraction = 0.90f,
+        hardCap = 760.dp,
         containerColor = colors.surface,
-        dragHandle = { BottomSheetDefaults.DragHandle(color = colors.textTertiary.copy(alpha = 0.45f)) }
-    ) {
+        contentColor = colors.textPrimary
+    ) { _ ->
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .navigationBarsPadding()
-                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 24.dp),
@@ -726,17 +724,16 @@ fun BatchGeneratorSheet(
         }
     }
 
-    ModalBottomSheet(
+    QraftModalSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        maxHeightFraction = 0.90f,
+        hardCap = 760.dp,
         containerColor = colors.surface,
-        dragHandle = { BottomSheetDefaults.DragHandle(color = colors.textTertiary.copy(alpha = 0.45f)) }
-    ) {
+        contentColor = colors.textPrimary
+    ) { _ ->
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .navigationBarsPadding()
-                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 24.dp),
@@ -907,127 +904,6 @@ fun BatchGeneratorSheet(
                         if (exportPdfSheet) pdfLayout else null
                     )
                 }
-            )
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun SettingsModalSheet(
-    preferences: UserPreferences,
-    onDismiss: () -> Unit,
-    onThemeChange: (ThemeMode) -> Unit,
-    onCreatorNameChange: (String) -> Unit,
-    onAutoVerifyChange: (Boolean) -> Unit,
-    onDefaultFormatChange: (ExportImageFormat) -> Unit,
-    onDefaultResolutionChange: (Int) -> Unit,
-    onExportBackup: (() -> Unit)? = null,
-    onImportBackup: (() -> Unit)? = null
-) {
-    val colors = QraftThemeTokens.colors
-    var nameDraft by remember(preferences.creatorName) { mutableStateOf(preferences.creatorName) }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = colors.surface,
-        dragHandle = { BottomSheetDefaults.DragHandle(color = colors.textTertiary.copy(alpha = 0.45f)) }
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .imePadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Text("Studio Preferences", style = MaterialTheme.typography.headlineMedium, color = colors.textPrimary)
-
-            SectionLabel("Appearance")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ThemeMode.entries.forEach { mode ->
-                    SelectableChip(
-                        label = mode.label,
-                        selected = preferences.themeMode == mode,
-                        onClick = { onThemeChange(mode) },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-
-            QraftTextField(
-                value = nameDraft,
-                onValueChange = {
-                    nameDraft = it
-                    onCreatorNameChange(it)
-                },
-                label = "Greeting Name",
-                placeholder = "Creator",
-                leadingIcon = Icons.Rounded.Person
-            )
-
-            ToggleRow(
-                title = "Live Scannability Verification",
-                subtitle = "Automatically test-decodes your custom QR with ZXing while designing",
-                checked = preferences.autoVerifyScannability,
-                onCheckedChange = onAutoVerifyChange
-            )
-
-            SectionLabel("Default Export Format")
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                listOf(
-                    ExportImageFormat.PNG,
-                    ExportImageFormat.JPEG,
-                    ExportImageFormat.SVG,
-                    ExportImageFormat.PDF
-                ).forEach { fmt ->
-                    SelectableChip(
-                        label = fmt.extension.uppercase(),
-                        selected = preferences.defaultExportFormat == fmt,
-                        onClick = { onDefaultFormatChange(fmt) },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-
-            SectionLabel("Default Export Resolution")
-            QraftResolutionSelector(
-                selectedPx = preferences.defaultExportResolution,
-                onSelect = onDefaultResolutionChange
-            )
-
-            if (onExportBackup != null && onImportBackup != null) {
-                SectionLabel("Backup & Restore (.qraft)")
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    QraftPillButton(
-                        text = "Export Backup",
-                        variant = QraftButtonVariant.TONAL,
-                        leadingIcon = Icons.Rounded.CloudUpload,
-                        height = 44.dp,
-                        modifier = Modifier.weight(1f),
-                        onClick = onExportBackup
-                    )
-                    QraftPillButton(
-                        text = "Restore Backup",
-                        variant = QraftButtonVariant.SECONDARY,
-                        leadingIcon = Icons.Rounded.CloudDownload,
-                        height = 44.dp,
-                        modifier = Modifier.weight(1f),
-                        onClick = onImportBackup
-                    )
-                }
-            }
-
-            Text(
-                text = "Qraft QR Studio • v4.0.0",
-                style = MaterialTheme.typography.labelSmall,
-                color = colors.textTertiary
             )
         }
     }

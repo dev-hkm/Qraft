@@ -17,5 +17,13 @@ local.properties
 *.aab
 *.jks
 *.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+*.qraft
+.env
+.env.*
 keystore.properties
 release_output/
+qa_*.png

@@ -180,7 +180,26 @@ object BarcodeEngine {
         targetWidthPx: Int = spec.exportWidthPx,
         forceOpaqueWhiteForJpeg: Boolean = false
     ): Bitmap {
-        val w = targetWidthPx.coerceIn(512, 8192)
+        var attemptW = targetWidthPx.coerceIn(512, 8192)
+        var lastOom: OutOfMemoryError? = null
+        while (attemptW >= 512) {
+            try {
+                return renderBarcodeBitmapExact(spec, attemptW, forceOpaqueWhiteForJpeg)
+            } catch (oom: OutOfMemoryError) {
+                lastOom = oom
+                System.gc()
+                if (attemptW <= 512) break
+                attemptW = (attemptW / 2).coerceAtLeast(512)
+            }
+        }
+        throw lastOom ?: OutOfMemoryError("Unable to allocate barcode bitmap")
+    }
+
+    private fun renderBarcodeBitmapExact(
+        spec: BarcodeDesignSpec,
+        w: Int,
+        forceOpaqueWhiteForJpeg: Boolean
+    ): Bitmap {
         val (matrixOrNull, validation) = encodeMatrix(spec)
         val isSquare2D = spec.format == BarcodeFormatType.AZTEC || spec.format == BarcodeFormatType.DATA_MATRIX
         val h = when {

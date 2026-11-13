@@ -49,6 +49,7 @@ import com.hkm.qraft.ui.components.*
 import com.hkm.qraft.ui.screens.HomeScreen
 import com.hkm.qraft.ui.screens.LibraryScreen
 import com.hkm.qraft.ui.screens.ScannerScreen
+import com.hkm.qraft.ui.screens.SettingsScreen
 import com.hkm.qraft.ui.screens.StudioScreen
 import com.hkm.qraft.ui.theme.QraftTheme
 import com.hkm.qraft.ui.theme.QraftThemeTokens
@@ -60,6 +61,7 @@ private object Routes {
     const val STUDIO = "studio"
     const val LIBRARY = "library"
     const val SCANNER = "scanner"
+    const val SETTINGS = "settings"
 }
 
 private data class FullscreenPreviewState(
@@ -158,7 +160,9 @@ fun QraftAppRoot(
         }
     }
     val launchQrImport: () -> Unit = {
-        qrImportPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        runCatching {
+            qrImportPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        }
     }
 
     LaunchedEffect(incomingIntent) {
@@ -181,7 +185,6 @@ fun QraftAppRoot(
     var showCreatePicker by remember { mutableStateOf(false) }
     var showExportSheet by remember { mutableStateOf(false) }
     var showBatchSheet by remember { mutableStateOf(false) }
-    var showSettingsSheet by remember { mutableStateOf(false) }
     var fullscreenItem by remember { mutableStateOf<FullscreenPreviewState?>(null) }
 
     var bannerMessage by remember { mutableStateOf<String?>(null) }
@@ -218,7 +221,9 @@ fun QraftAppRoot(
                     selectedCategory = selectedHomeCategory,
                     onSelectCategory = viewModel::selectHomeCategory,
                     onCycleTheme = viewModel::cycleThemeMode,
-                    onOpenSettings = { showSettingsSheet = true },
+                    onOpenSettings = {
+                        navController.navigate(Routes.SETTINGS) { launchSingleTop = true }
+                    },
                     onOpenStudioNew = { type ->
                         viewModel.startNewQr(type)
                         navController.navigate(Routes.STUDIO)
@@ -279,7 +284,11 @@ fun QraftAppRoot(
                     },
                     onBulkFavorite = viewModel::bulkSetFavorite,
                     onBulkDelete = viewModel::bulkDeleteItems,
-                    onExportPrintSheet = viewModel::exportLibraryPrintSheet
+                    onExportPrintSheet = viewModel::exportLibraryPrintSheet,
+                    onToggleArchive = viewModel::toggleItemArchived,
+                    onBulkArchive = viewModel::bulkSetArchived,
+                    onRenameItem = viewModel::renameItem,
+                    onOrganizeItem = viewModel::updateItemOrganization
                 )
             }
 
@@ -337,6 +346,27 @@ fun QraftAppRoot(
                     onCopyResult = viewModel::copyRawText
                 )
             }
+
+            composable(Routes.SETTINGS) {
+                SettingsScreen(
+                    preferences = prefs,
+                    savedCount = savedItems.count { !it.isArchived },
+                    archivedCount = savedItems.count { it.isArchived },
+                    customPresetCount = customPresets.size,
+                    onBack = { navController.popBackStack() },
+                    onThemeChange = viewModel::setThemeMode,
+                    onCreatorNameChange = viewModel::setCreatorName,
+                    onAutoVerifyChange = viewModel::setAutoVerify,
+                    onDefaultFormatChange = viewModel::setDefaultExportFormat,
+                    onDefaultResolutionChange = viewModel::setDefaultExportResolution,
+                    onExportBackup = {
+                        runCatching { backupExportLauncher.launch("qraft_backup_v6.qraft") }
+                    },
+                    onImportBackup = {
+                        runCatching { backupImportLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }
+                    }
+                )
+            }
         }
 
         // Apple-style floating status toast pill
@@ -363,7 +393,7 @@ fun QraftAppRoot(
                     Icon(
                         imageVector = Icons.Rounded.CheckCircle,
                         contentDescription = null,
-                        tint = colors.timelineDotActive,
+                        tint = colors.activePillContent,
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
@@ -432,24 +462,6 @@ fun QraftAppRoot(
                 viewModel.runBatchGenerate(lines, saveToLib, exportPngs, exportPdfLayout) {
                     showBatchSheet = false
                 }
-            }
-        )
-    }
-
-    if (showSettingsSheet) {
-        SettingsModalSheet(
-            preferences = prefs,
-            onDismiss = { showSettingsSheet = false },
-            onThemeChange = viewModel::setThemeMode,
-            onCreatorNameChange = viewModel::setCreatorName,
-            onAutoVerifyChange = viewModel::setAutoVerify,
-            onDefaultFormatChange = viewModel::setDefaultExportFormat,
-            onDefaultResolutionChange = viewModel::setDefaultExportResolution,
-            onExportBackup = {
-                backupExportLauncher.launch("qraft_backup_v5.qraft")
-            },
-            onImportBackup = {
-                backupImportLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
             }
         )
     }

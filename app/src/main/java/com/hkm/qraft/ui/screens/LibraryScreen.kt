@@ -29,6 +29,7 @@ import com.hkm.qraft.qr.PrintSheetLayout
 import com.hkm.qraft.qr.QrPayloadEncoder
 import com.hkm.qraft.ui.components.QraftButtonVariant
 import com.hkm.qraft.ui.components.QraftHeaderCircleButton
+import com.hkm.qraft.ui.components.QraftModalSheet
 import com.hkm.qraft.ui.components.QraftPillButton
 import com.hkm.qraft.ui.components.QraftStatusBarScrim
 import com.hkm.qraft.ui.components.QraftTextField
@@ -36,6 +37,7 @@ import com.hkm.qraft.ui.components.SelectableChip
 import com.hkm.qraft.ui.components.iconForContentType
 import com.hkm.qraft.ui.theme.QraftThemeTokens
 import com.hkm.qraft.ui.theme.appleBounceClick
+import androidx.compose.ui.graphics.vector.ImageVector
 
 private enum class LibrarySort(val label: String) {
     UPDATED("Latest"),
@@ -59,12 +61,18 @@ fun LibraryScreen(
     onOpenScanner: () -> Unit = onImportQr,
     onBulkFavorite: (Set<String>, Boolean) -> Unit = { ids, fav -> ids.forEach { _ -> }; Unit },
     onBulkDelete: (Set<String>) -> Unit = { ids -> ids.forEach(onDelete) },
-    onExportPrintSheet: (List<QrCreationItem>, PrintSheetLayout, Boolean) -> Unit = { _, _, _ -> }
+    onExportPrintSheet: (List<QrCreationItem>, PrintSheetLayout, Boolean) -> Unit = { _, _, _ -> },
+    onToggleArchive: (String) -> Unit = {},
+    onBulkArchive: (Set<String>, Boolean) -> Unit = { _, _ -> },
+    onRenameItem: (String, String) -> Unit = { _, _ -> },
+    onOrganizeItem: (String, String?, List<String>) -> Unit = { _, _, _ -> }
 ) {
     val colors = QraftThemeTokens.colors
     var search by remember { mutableStateOf("") }
     var onlyFavorites by remember { mutableStateOf(false) }
     var onlyBarcodes by remember { mutableStateOf(false) }
+    var showArchived by remember { mutableStateOf(false) }
+    var selectedFolder by remember { mutableStateOf<String?>(null) }
     var filterType by remember { mutableStateOf<QrContentType?>(null) }
     var sortBy by remember { mutableStateOf(LibrarySort.UPDATED) }
 
@@ -72,21 +80,34 @@ fun LibraryScreen(
     var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showPrintDialog by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var actionTargetItem by remember { mutableStateOf<QrCreationItem?>(null) }
+    var renameTargetItem by remember { mutableStateOf<QrCreationItem?>(null) }
+    var organizeTargetItem by remember { mutableStateOf<QrCreationItem?>(null) }
 
-    val filtered = remember(items, search, onlyFavorites, onlyBarcodes, filterType, sortBy) {
+    val availableFolders = remember(items) {
+        items.mapNotNull { it.resolvedFolder().takeIf(String::isNotBlank) }.distinct().sorted()
+    }
+    val archivedCount = remember(items) { items.count { it.isArchived } }
+    val activeCount = remember(items) { items.size - archivedCount }
+
+    val filtered = remember(items, search, onlyFavorites, onlyBarcodes, showArchived, selectedFolder, filterType, sortBy) {
         val base = items.filter { item ->
+            val matchArchive = item.isArchived == showArchived
             val isBc = item.resolvedCodeKind() == CodeKind.BARCODE
             val matchFav = !onlyFavorites || item.isFavorite
             val matchKind = !onlyBarcodes || isBc
+            val matchFolder = selectedFolder == null || item.resolvedFolder().equals(selectedFolder, ignoreCase = true)
             val matchType = filterType == null || (!isBc && item.type == filterType)
             val q = search.trim().lowercase()
             val bc = if (isBc) item.resolvedBarcode() else null
             val matchSearch = q.isEmpty() ||
                 item.title.lowercase().contains(q) ||
                 item.type.title.lowercase().contains(q) ||
+                item.resolvedFolder().lowercase().contains(q) ||
+                item.resolvedTags().any { it.lowercase().contains(q) } ||
                 (bc != null && (bc.data.lowercase().contains(q) || bc.format.label.lowercase().contains(q))) ||
                 QrPayloadEncoder.encode(item.type, item.payload).lowercase().contains(q)
-            matchFav && matchKind && matchType && matchSearch
+            matchArchive && matchFav && matchKind && matchFolder && matchType && matchSearch
         }
         when (sortBy) {
             LibrarySort.UPDATED -> base.sortedByDescending { it.updatedAtMillis }
@@ -220,11 +241,13 @@ fun LibraryScreen(
                             }
                         )
                         SelectableChip(
-                            label = "All (${items.size})",
-                            selected = !onlyFavorites && !onlyBarcodes && filterType == null,
+                            label = "All ($activeCount)",
+                            selected = !showArchived && !onlyFavorites && !onlyBarcodes && filterType == null && selectedFolder == null,
                             onClick = {
+                                showArchived = false
                                 onlyFavorites = false
                                 onlyBarcodes = false
+                                selectedFolder = null
                                 filterType = null
                             }
                         )
@@ -241,6 +264,23 @@ fun LibraryScreen(
                                 if (onlyBarcodes) filterType = null
                             }
                         )
+                        SelectableChip(
+                            label = if (archivedCount > 0) "Archived ($archivedCount)" else "Archived",
+                            selected = showArchived,
+                            onClick = {
+                                showArchived = !showArchived
+                                selectedIds = emptySet()
+                            }
+                        )
+                        availableFolders.forEach { folderName ->
+                            SelectableChip(
+                                label = "Folder: $folderName",
+                                selected = selectedFolder.equals(folderName, ignoreCase = true),
+                                onClick = {
+                                    selectedFolder = if (selectedFolder.equals(folderName, ignoreCase = true)) null else folderName
+                                }
+                            )
+                        }
                         QrContentType.entries.forEach { t ->
                             SelectableChip(
                                 label = t.shortCode,
@@ -313,8 +353,7 @@ fun LibraryScreen(
                         },
                         onFullscreen = { onQuickFullscreen(item) },
                         onToggleFavorite = { onToggleFavorite(item.id) },
-                        onDuplicate = { onDuplicate(item) },
-                        onDelete = { onDelete(item.id) }
+                        onMoreActions = { actionTargetItem = item }
                     )
                 }
             }
@@ -360,6 +399,20 @@ fun LibraryScreen(
                     ) {
                         Icon(Icons.Rounded.Star, contentDescription = "Pin / Unpin", tint = if (selectedIds.isNotEmpty()) colors.timelineDotActive else colors.textTertiary)
                     }
+                    IconButton(
+                        enabled = selectedIds.isNotEmpty(),
+                        onClick = {
+                            onBulkArchive(selectedIds, !showArchived)
+                            selectedIds = emptySet()
+                            selectionMode = false
+                        }
+                    ) {
+                        Icon(
+                            imageVector = if (showArchived) Icons.Rounded.Unarchive else Icons.Rounded.Archive,
+                            contentDescription = if (showArchived) "Restore from archive" else "Archive selected",
+                            tint = if (selectedIds.isNotEmpty()) colors.textPrimary else colors.textTertiary
+                        )
+                    }
                     QraftPillButton(
                         text = "Print",
                         variant = QraftButtonVariant.TONAL,
@@ -383,80 +436,411 @@ fun LibraryScreen(
     }
 
     if (showDeleteConfirm) {
-        AlertDialog(
+        QraftModalSheet(
             onDismissRequest = { showDeleteConfirm = false },
+            maxHeightFraction = 0.55f,
+            hardCap = 360.dp,
             containerColor = colors.surface,
-            title = { Text("Delete ${selectedIds.size} QR codes?", color = colors.textPrimary) },
-            text = { Text("This permanently removes the selected items from your Library.", color = colors.textSecondary) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        onBulkDelete(selectedIds)
-                        selectedIds = emptySet()
-                        selectionMode = false
-                        showDeleteConfirm = false
-                    }
-                ) {
-                    Text("Delete", color = colors.dangerFg, fontWeight = FontWeight.Bold)
+            contentColor = colors.textPrimary
+        ) { dismissSheet ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "Delete ${selectedIds.size} QR codes?",
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = colors.textPrimary
+                    )
+                    Text(
+                        text = "This permanently removes the selected items from your Library. Tip: you can Archive items instead to keep them hidden without losing them.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textSecondary
+                    )
                 }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) {
-                    Text("Cancel", color = colors.textSecondary)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    QraftPillButton(
+                        text = "Cancel",
+                        variant = QraftButtonVariant.SECONDARY,
+                        height = 46.dp,
+                        modifier = Modifier.weight(1f),
+                        onClick = dismissSheet
+                    )
+                    QraftPillButton(
+                        text = "Delete",
+                        variant = QraftButtonVariant.DANGER,
+                        leadingIcon = Icons.Rounded.DeleteOutline,
+                        height = 46.dp,
+                        modifier = Modifier.weight(1.2f),
+                        onClick = {
+                            onBulkDelete(selectedIds)
+                            selectedIds = emptySet()
+                            selectionMode = false
+                            dismissSheet()
+                        }
+                    )
                 }
             }
-        )
+        }
     }
 
     if (showPrintDialog) {
         val chosenItems = remember(items, selectedIds) { items.filter { it.id in selectedIds } }
         var layout by remember { mutableStateOf(PrintSheetLayout.STICKERS_3X4) }
-        AlertDialog(
+        QraftModalSheet(
             onDismissRequest = { showPrintDialog = false },
+            maxHeightFraction = 0.78f,
+            hardCap = 540.dp,
             containerColor = colors.surface,
-            title = { Text("Print ${chosenItems.size} QR Labels", color = colors.textPrimary) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Choose A4 printable sheet layout (300 DPI):", color = colors.textSecondary, style = MaterialTheme.typography.bodyMedium)
-                    PrintSheetLayout.entries.forEach { opt ->
+            contentColor = colors.textPrimary
+        ) { dismissSheet ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Print ${chosenItems.size} QR Labels",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = colors.textPrimary
+                )
+                Text(
+                    text = "Choose A4 printable sheet layout (300 DPI):",
+                    color = colors.textSecondary,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                PrintSheetLayout.entries.forEach { opt ->
+                    SelectableChip(
+                        label = "${opt.label} (${opt.description})",
+                        selected = layout == opt,
+                        onClick = { layout = opt },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    QraftPillButton(
+                        text = "A4 PNG",
+                        variant = QraftButtonVariant.SECONDARY,
+                        leadingIcon = Icons.Rounded.Image,
+                        height = 46.dp,
+                        modifier = Modifier.weight(1f),
+                        onClick = {
+                            onExportPrintSheet(chosenItems, layout, false)
+                            selectionMode = false
+                            selectedIds = emptySet()
+                            dismissSheet()
+                        }
+                    )
+                    QraftPillButton(
+                        text = "Save PDF",
+                        variant = QraftButtonVariant.PRIMARY,
+                        leadingIcon = Icons.Rounded.PictureAsPdf,
+                        height = 46.dp,
+                        modifier = Modifier.weight(1.2f),
+                        onClick = {
+                            onExportPrintSheet(chosenItems, layout, true)
+                            selectionMode = false
+                            selectedIds = emptySet()
+                            dismissSheet()
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    actionTargetItem?.let { target ->
+        LibraryActionSheet(
+            item = target,
+            onDismiss = { actionTargetItem = null },
+            onEdit = {
+                actionTargetItem = null
+                onOpenExisting(target)
+            },
+            onRename = {
+                actionTargetItem = null
+                renameTargetItem = target
+            },
+            onOrganize = {
+                actionTargetItem = null
+                organizeTargetItem = target
+            },
+            onFullscreen = {
+                actionTargetItem = null
+                onQuickFullscreen(target)
+            },
+            onDuplicate = {
+                actionTargetItem = null
+                onDuplicate(target)
+            },
+            onToggleArchive = {
+                actionTargetItem = null
+                onToggleArchive(target.id)
+            },
+            onDelete = {
+                actionTargetItem = null
+                onDelete(target.id)
+            }
+        )
+    }
+
+    renameTargetItem?.let { target ->
+        var newName by remember(target.id) { mutableStateOf(target.title) }
+        QraftModalSheet(
+            onDismissRequest = { renameTargetItem = null },
+            maxHeightFraction = 0.60f,
+            hardCap = 360.dp,
+            containerColor = colors.surface,
+            contentColor = colors.textPrimary
+        ) { dismissSheet ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Text("Rename Code", style = MaterialTheme.typography.headlineMedium, color = colors.textPrimary)
+                QraftTextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    label = "Title",
+                    placeholder = "Enter a memorable name",
+                    leadingIcon = Icons.Rounded.DriveFileRenameOutline
+                )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    QraftPillButton(
+                        text = "Cancel",
+                        variant = QraftButtonVariant.SECONDARY,
+                        height = 46.dp,
+                        modifier = Modifier.weight(1f),
+                        onClick = dismissSheet
+                    )
+                    QraftPillButton(
+                        text = "Save Name",
+                        variant = QraftButtonVariant.PRIMARY,
+                        leadingIcon = Icons.Rounded.Check,
+                        height = 46.dp,
+                        modifier = Modifier.weight(1.2f),
+                        onClick = {
+                            onRenameItem(target.id, newName)
+                            dismissSheet()
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    organizeTargetItem?.let { target ->
+        var folderDraft by remember(target.id) { mutableStateOf(target.resolvedFolder()) }
+        var tagsDraft by remember(target.id) { mutableStateOf(target.resolvedTags().joinToString(", ")) }
+        val suggestedFolders = remember(availableFolders) {
+            (listOf("Work", "Personal", "Business", "Events", "Wi-Fi") + availableFolders).distinct()
+        }
+        QraftModalSheet(
+            onDismissRequest = { organizeTargetItem = null },
+            maxHeightFraction = 0.78f,
+            hardCap = 520.dp,
+            containerColor = colors.surface,
+            contentColor = colors.textPrimary
+        ) { dismissSheet ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Folder & Tags", style = MaterialTheme.typography.headlineMedium, color = colors.textPrimary)
+                    Text(
+                        text = "Group \"${target.title}\" into a folder and searchable tags.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textSecondary
+                    )
+                }
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    SelectableChip(
+                        label = "No Folder",
+                        selected = folderDraft.isBlank(),
+                        onClick = { folderDraft = "" }
+                    )
+                    suggestedFolders.forEach { presetFolder ->
                         SelectableChip(
-                            label = "${opt.label} (${opt.description})",
-                            selected = layout == opt,
-                            onClick = { layout = opt },
-                            modifier = Modifier.fillMaxWidth()
+                            label = presetFolder,
+                            selected = folderDraft.equals(presetFolder, ignoreCase = true),
+                            onClick = { folderDraft = presetFolder }
                         )
                     }
                 }
-            },
-            confirmButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(
+                QraftTextField(
+                    value = folderDraft,
+                    onValueChange = { folderDraft = it },
+                    label = "Folder Name",
+                    placeholder = "e.g. Work, Menu, Invoices",
+                    leadingIcon = Icons.Rounded.FolderOpen
+                )
+                QraftTextField(
+                    value = tagsDraft,
+                    onValueChange = { tagsDraft = it },
+                    label = "Tags (comma separated)",
+                    placeholder = "e.g. promo, v2, store-front",
+                    leadingIcon = Icons.Rounded.Tag
+                )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    QraftPillButton(
+                        text = "Cancel",
+                        variant = QraftButtonVariant.SECONDARY,
+                        height = 46.dp,
+                        modifier = Modifier.weight(1f),
+                        onClick = dismissSheet
+                    )
+                    QraftPillButton(
+                        text = "Apply",
+                        variant = QraftButtonVariant.PRIMARY,
+                        leadingIcon = Icons.Rounded.Check,
+                        height = 46.dp,
+                        modifier = Modifier.weight(1.2f),
                         onClick = {
-                            onExportPrintSheet(chosenItems, layout, false)
-                            showPrintDialog = false
-                            selectionMode = false
-                            selectedIds = emptySet()
+                            val parsedTags = tagsDraft.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                            onOrganizeItem(target.id, folderDraft.trim().takeIf { it.isNotEmpty() }, parsedTags)
+                            dismissSheet()
                         }
-                    ) {
-                        Text("A4 PNG", color = colors.textPrimary)
-                    }
-                    TextButton(
-                        onClick = {
-                            onExportPrintSheet(chosenItems, layout, true)
-                            showPrintDialog = false
-                            selectionMode = false
-                            selectedIds = emptySet()
-                        }
-                    ) {
-                        Text("Save PDF", color = colors.espressoAccent, fontWeight = FontWeight.Bold)
-                    }
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showPrintDialog = false }) {
-                    Text("Cancel", color = colors.textSecondary)
+                    )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun LibraryActionSheet(
+    item: QrCreationItem,
+    onDismiss: () -> Unit,
+    onEdit: () -> Unit,
+    onRename: () -> Unit,
+    onOrganize: () -> Unit,
+    onFullscreen: () -> Unit,
+    onDuplicate: () -> Unit,
+    onToggleArchive: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val colors = QraftThemeTokens.colors
+    QraftModalSheet(
+        onDismissRequest = onDismiss,
+        maxHeightFraction = 0.80f,
+        hardCap = 580.dp,
+        containerColor = colors.surface,
+        contentColor = colors.textPrimary
+    ) { dismissSheet ->
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = item.title,
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = colors.textPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                val meta = buildString {
+                    append(if (item.resolvedCodeKind() == CodeKind.BARCODE) item.resolvedBarcode().format.label else item.type.title)
+                    if (item.resolvedFolder().isNotEmpty()) append(" • Folder: ${item.resolvedFolder()}")
+                    if (item.isArchived) append(" • Archived")
+                }
+                Text(meta, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+            }
+
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = colors.surfaceMuted,
+                border = BorderStroke(1.dp, colors.cardBorder),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    LibrarySheetActionRow(Icons.Rounded.Edit, "Edit in Studio") {
+                        dismissSheet(); onEdit()
+                    }
+                    HorizontalDivider(color = colors.cardBorder.copy(alpha = 0.7f))
+                    LibrarySheetActionRow(Icons.Rounded.DriveFileRenameOutline, "Rename") {
+                        dismissSheet(); onRename()
+                    }
+                    HorizontalDivider(color = colors.cardBorder.copy(alpha = 0.7f))
+                    LibrarySheetActionRow(Icons.Rounded.FolderOpen, "Folder & Tags") {
+                        dismissSheet(); onOrganize()
+                    }
+                    HorizontalDivider(color = colors.cardBorder.copy(alpha = 0.7f))
+                    LibrarySheetActionRow(Icons.Rounded.Fullscreen, "Fullscreen Scan Preview") {
+                        dismissSheet(); onFullscreen()
+                    }
+                    HorizontalDivider(color = colors.cardBorder.copy(alpha = 0.7f))
+                    LibrarySheetActionRow(Icons.Rounded.ContentCopy, "Duplicate") {
+                        dismissSheet(); onDuplicate()
+                    }
+                    HorizontalDivider(color = colors.cardBorder.copy(alpha = 0.7f))
+                    LibrarySheetActionRow(
+                        icon = if (item.isArchived) Icons.Rounded.Unarchive else Icons.Rounded.Archive,
+                        label = if (item.isArchived) "Restore to Active Library" else "Move to Archive"
+                    ) {
+                        dismissSheet(); onToggleArchive()
+                    }
+                    HorizontalDivider(color = colors.cardBorder.copy(alpha = 0.7f))
+                    LibrarySheetActionRow(
+                        icon = Icons.Rounded.DeleteOutline,
+                        label = "Delete Permanently",
+                        tint = colors.dangerFg
+                    ) {
+                        dismissSheet(); onDelete()
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LibrarySheetActionRow(
+    icon: ImageVector,
+    label: String,
+    tint: androidx.compose.ui.graphics.Color = QraftThemeTokens.colors.textPrimary,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .appleBounceClick { onClick() }
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Icon(imageVector = icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleMedium,
+            fontSize = 15.sp,
+            color = tint
         )
     }
 }
@@ -471,14 +855,14 @@ private fun LibraryItemCard(
     onOpen: () -> Unit,
     onFullscreen: () -> Unit,
     onToggleFavorite: () -> Unit,
-    onDuplicate: () -> Unit,
-    onDelete: () -> Unit
+    onMoreActions: () -> Unit
 ) {
             val colors = QraftThemeTokens.colors
             val pastel = colors.pastelAt(item.type.pastelIndex)
             val isBarcode = item.resolvedCodeKind() == CodeKind.BARCODE
             val bc = if (isBarcode) item.resolvedBarcode() else null
-            var showMenu by remember { mutableStateOf(false) }
+            val folderLabel = item.resolvedFolder()
+            val tagsList = item.resolvedTags()
 
     Surface(
         shape = RoundedCornerShape(22.dp),
@@ -535,18 +919,39 @@ private fun LibraryItemCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Text(
-                        text = if (bc != null) {
-                            "${bc.format.shortCode} • ${bc.exportWidthPx}px"
-                        } else {
-                            "${item.design.pixelStyle.label} • ${item.design.eyeFrameStyle.label} • ${item.design.outerFrame.style.label}"
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = colors.textTertiary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
+                        Text(
+                            text = if (bc != null) {
+                                "${bc.format.shortCode} • ${bc.exportWidthPx}px"
+                            } else {
+                                "${item.design.pixelStyle.label} • ${item.design.eyeFrameStyle.label} • ${item.design.outerFrame.style.label}"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.textTertiary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (folderLabel.isNotEmpty() || tagsList.isNotEmpty() || item.isArchived) {
+                            val badgeText = buildString {
+                                if (item.isArchived) append("Archived")
+                                if (folderLabel.isNotEmpty()) {
+                                    if (isNotEmpty()) append(" • ")
+                                    append(folderLabel)
+                                }
+                                if (tagsList.isNotEmpty()) {
+                                    if (isNotEmpty()) append(" • ")
+                                    append(tagsList.take(2).joinToString(" ") { "#$it" })
+                                }
+                            }
+                            Text(
+                                text = badgeText,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.textSecondary,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -576,49 +981,18 @@ private fun LibraryItemCard(
                         )
                     }
 
-                    Box {
-                        IconButton(
-                            onClick = { showMenu = true },
-                            modifier = Modifier.size(34.dp)
-                        ) {
-                            Icon(
-                                Icons.Rounded.MoreVert,
-                                contentDescription = "More actions",
-                                tint = colors.textSecondary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                DropdownMenu(
-                    expanded = showMenu,
-                    onDismissRequest = { showMenu = false }
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Edit in Studio") },
-                        leadingIcon = { Icon(Icons.Rounded.Edit, null) },
-                        onClick = {
-                            showMenu = false
-                            onOpen()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Duplicate") },
-                        leadingIcon = { Icon(Icons.Rounded.ContentCopy, null) },
-                        onClick = {
-                            showMenu = false
-                            onDuplicate()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Delete", color = colors.dangerFg) },
-                        leadingIcon = { Icon(Icons.Rounded.DeleteOutline, null, tint = colors.dangerFg) },
-                        onClick = {
-                            showMenu = false
-                            onDelete()
-                        }
-                    )
-                }
+                    IconButton(
+                        onClick = onMoreActions,
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            Icons.Rounded.MoreVert,
+                            contentDescription = "More actions",
+                            tint = colors.textSecondary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
         }
-    }
 }

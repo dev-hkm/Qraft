@@ -74,7 +74,6 @@ fun ContentEditorTab(
             ) {
                 QrContentType.entries.forEach { item ->
                     val selected = item == type
-                    val pastel = colors.pastelAt(item.pastelIndex)
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -92,7 +91,7 @@ fun ContentEditorTab(
                         Icon(
                             imageVector = iconForContentType(item),
                             contentDescription = null,
-                            tint = if (selected) colors.activePillContent else pastel.content,
+                            tint = if (selected) colors.activePillContent else colors.textPrimary,
                             modifier = Modifier.size(16.dp)
                         )
                         Text(
@@ -391,21 +390,54 @@ fun ContentEditorTab(
                             placeholder = "Studio Hall A",
                             leadingIcon = Icons.Rounded.LocationOn
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            QraftTextField(
-                                value = fields.eventStart,
-                                onValueChange = { onFieldsChange(fields.copy(eventStart = it)) },
-                                label = "Start (YYYYMMDDTHHMMSS)",
-                                placeholder = "20261120T090000",
-                                modifier = Modifier.weight(1f)
-                            )
-                            QraftTextField(
-                                value = fields.eventEnd,
-                                onValueChange = { onFieldsChange(fields.copy(eventEnd = it)) },
-                                label = "End (YYYYMMDDTHHMMSS)",
-                                placeholder = "20261120T110000",
-                                modifier = Modifier.weight(1f)
-                            )
+                        QraftTextField(
+                            value = fields.eventStart,
+                            onValueChange = { onFieldsChange(fields.copy(eventStart = it)) },
+                            label = "Start (YYYYMMDDTHHMMSS)",
+                            placeholder = "20261120T090000",
+                            leadingIcon = Icons.Rounded.Schedule
+                        )
+                        QraftTextField(
+                            value = fields.eventEnd,
+                            onValueChange = { onFieldsChange(fields.copy(eventEnd = it)) },
+                            label = "End (YYYYMMDDTHHMMSS)",
+                            placeholder = "20261120T110000",
+                            leadingIcon = Icons.Rounded.EventAvailable
+                        )
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            SmallAssistChip("+1h Meeting") {
+                                val fmt = java.text.SimpleDateFormat("yyyyMMdd'T'HHmmss", java.util.Locale.US)
+                                val cal = java.util.Calendar.getInstance().apply {
+                                    set(java.util.Calendar.MINUTE, 0)
+                                    set(java.util.Calendar.SECOND, 0)
+                                    add(java.util.Calendar.HOUR_OF_DAY, 1)
+                                }
+                                val start = fmt.format(cal.time)
+                                cal.add(java.util.Calendar.HOUR_OF_DAY, 1)
+                                val end = fmt.format(cal.time)
+                                onFieldsChange(fields.copy(eventStart = start, eventEnd = end))
+                            }
+                            SmallAssistChip("Tomorrow 9 AM") {
+                                val fmt = java.text.SimpleDateFormat("yyyyMMdd'T'HHmmss", java.util.Locale.US)
+                                val cal = java.util.Calendar.getInstance().apply {
+                                    add(java.util.Calendar.DAY_OF_YEAR, 1)
+                                    set(java.util.Calendar.HOUR_OF_DAY, 9)
+                                    set(java.util.Calendar.MINUTE, 0)
+                                    set(java.util.Calendar.SECOND, 0)
+                                }
+                                val start = fmt.format(cal.time)
+                                cal.add(java.util.Calendar.HOUR_OF_DAY, 2)
+                                val end = fmt.format(cal.time)
+                                onFieldsChange(fields.copy(eventStart = start, eventEnd = end))
+                            }
+                            SmallAssistChip("All Day") {
+                                val fmt = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US)
+                                val today = fmt.format(java.util.Date())
+                                onFieldsChange(fields.copy(eventStart = "${today}T000000", eventEnd = "${today}T235900"))
+                            }
                         }
                         QraftTextField(
                             value = fields.eventDescription,
@@ -600,11 +632,13 @@ fun QraftTextField(
     trailingIcon: (@Composable () -> Unit)? = null,
     singleLine: Boolean = true,
     minLines: Int = 1,
-    maxLines: Int = 1,
+    maxLines: Int = if (singleLine) 1 else maxOf(minLines, 4),
     keyboardType: KeyboardType = KeyboardType.Text,
     visualTransformation: VisualTransformation = VisualTransformation.None
 ) {
     val colors = QraftThemeTokens.colors
+    val safeMaxLines = if (singleLine) 1 else maxOf(maxLines, minLines, 1)
+    val safeMinLines = minLines.coerceIn(1, safeMaxLines)
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
@@ -615,8 +649,8 @@ fun QraftTextField(
         },
         trailingIcon = trailingIcon,
         singleLine = singleLine,
-        minLines = minLines,
-        maxLines = maxLines,
+        minLines = safeMinLines,
+        maxLines = safeMaxLines,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
         visualTransformation = visualTransformation,
         shape = RoundedCornerShape(16.dp),

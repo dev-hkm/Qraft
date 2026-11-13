@@ -94,12 +94,18 @@ fun StudioScreen(
     val colors = QraftThemeTokens.colors
     var activeTab by remember { mutableStateOf(StudioTab.CONTENT) }
     var previewCompact by remember { mutableStateOf(false) }
+    val editorScrollState = rememberScrollState()
+    val editorScrolled by remember { derivedStateOf { editorScrollState.value > 24 } }
+    val effectiveCompact = previewCompact || editorScrolled
     val isBarcodeMode = draft.codeKind == CodeKind.BARCODE
     val animatedViewportSize by animateDpAsState(
-        targetValue = if (previewCompact) 84.dp else 166.dp,
+        targetValue = if (previewCompact) 84.dp else if (editorScrolled) 118.dp else 156.dp,
         animationSpec = AppleSprings.snappy(),
         label = "previewViewportSize"
     )
+    LaunchedEffect(activeTab, isBarcodeMode) {
+        editorScrollState.scrollTo(0)
+    }
     val exportResLabel = remember(draft.codeKind, draft.design.exportSizePx, draft.barcode.exportWidthPx) {
         val px = if (draft.codeKind == CodeKind.BARCODE) draft.barcode.exportWidthPx else draft.design.exportSizePx
         when {
@@ -131,17 +137,13 @@ fun StudioScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .navigationBarsPadding()
-                .imePadding()
-                .padding(bottom = 32.dp)
         ) {
-            // Tonser Scrolling Top Header Bar with Undo/Redo & Mode
+            // Fixed Top Header Bar with Undo/Redo & Mode
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
@@ -388,7 +390,7 @@ fun StudioScreen(
                         }
                     }
 
-                    if (!previewCompact && !isBarcodeMode) {
+                    if (!effectiveCompact && !isBarcodeMode) {
                         QrTelemetryGaugeRow(
                             charCount = draft.encodedPayload.length,
                             matrixSize = scannability.matrixSize,
@@ -459,28 +461,10 @@ fun StudioScreen(
                 }
             }
 
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(10.dp))
 
-            if (isBarcodeMode) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    QraftTextField(
-                        value = draft.title,
-                        onValueChange = onTitleChange,
-                        label = "Label / Title (optional)",
-                        placeholder = "e.g. Store SKU 893"
-                    )
-                    BarcodeEditorPanel(
-                        spec = draft.barcode,
-                        onSpecChange = onBarcodeChange
-                    )
-                }
-            } else {
-                // Monochrome Segmented Tab Strip
+            if (!isBarcodeMode) {
+                // Pinned Monochrome Segmented Tab Strip
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -520,68 +504,102 @@ fun StudioScreen(
                         }
                     }
                 }
+                Spacer(Modifier.height(8.dp))
+                HorizontalDivider(
+                    color = colors.cardBorder.copy(alpha = 0.55f),
+                    thickness = 0.8.dp
+                )
+            }
 
-                Spacer(Modifier.height(12.dp))
-
-                // Tab Body
-                AnimatedContent(
-                    targetState = activeTab,
-                    transitionSpec = {
-                        val forward = targetState.ordinal >= initialState.ordinal
-                        (slideInHorizontally(tween(240)) { if (forward) it / 8 else -it / 8 } + fadeIn(tween(200)))
-                            .togetherWith(slideOutHorizontally(tween(180)) { if (forward) -it / 8 else it / 8 } + fadeOut(tween(160)))
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = "studioTabBody"
-                ) { tab ->
+            // Independently Scrollable Editor Workspace (keeps live preview pinned above)
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(editorScrollState)
+                    .navigationBarsPadding()
+                    .imePadding()
+                    .padding(top = 10.dp, bottom = 32.dp)
+            ) {
+                if (isBarcodeMode) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .padding(horizontal = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        when (tab) {
-                            StudioTab.CONTENT -> ContentEditorTab(
-                                title = draft.title,
-                                type = draft.type,
-                                fields = draft.payload,
-                                encodedPayload = draft.encodedPayload,
-                                onTitleChange = onTitleChange,
-                                onTypeChange = onTypeChange,
-                                onFieldsChange = onFieldsChange
-                            )
+                        QraftTextField(
+                            value = draft.title,
+                            onValueChange = onTitleChange,
+                            label = "Label / Title (optional)",
+                            placeholder = "e.g. Store SKU 893"
+                        )
+                        BarcodeEditorPanel(
+                            spec = draft.barcode,
+                            onSpecChange = onBarcodeChange
+                        )
+                    }
+                } else {
+                    // Tab Body
+                    AnimatedContent(
+                        targetState = activeTab,
+                        transitionSpec = {
+                            val forward = targetState.ordinal >= initialState.ordinal
+                            (slideInHorizontally(tween(240)) { if (forward) it / 8 else -it / 8 } + fadeIn(tween(200)))
+                                .togetherWith(slideOutHorizontally(tween(180)) { if (forward) -it / 8 else it / 8 } + fadeOut(tween(160)))
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = "studioTabBody"
+                    ) { tab ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp)
+                        ) {
+                            when (tab) {
+                                StudioTab.CONTENT -> ContentEditorTab(
+                                    title = draft.title,
+                                    type = draft.type,
+                                    fields = draft.payload,
+                                    encodedPayload = draft.encodedPayload,
+                                    onTitleChange = onTitleChange,
+                                    onTypeChange = onTypeChange,
+                                    onFieldsChange = onFieldsChange
+                                )
 
-                            StudioTab.PRESETS -> PresetsEditorTab(
-                                builtInPresets = PresetCatalog.builtInPresets,
-                                customPresets = customPresets,
-                                currentDesign = draft.design,
-                                onApplyPreset = onApplyPreset,
-                                onSaveCurrentAsPreset = onSaveCustomPreset,
-                                onDeleteCustomPreset = onDeleteCustomPreset
-                            )
+                                StudioTab.PRESETS -> PresetsEditorTab(
+                                    builtInPresets = PresetCatalog.builtInPresets,
+                                    customPresets = customPresets,
+                                    currentDesign = draft.design,
+                                    onApplyPreset = onApplyPreset,
+                                    onSaveCurrentAsPreset = onSaveCustomPreset,
+                                    onDeleteCustomPreset = onDeleteCustomPreset
+                                )
 
-                            StudioTab.SHAPES -> ShapesEditorTab(
-                                design = draft.design,
-                                onDesignChange = onDesignChange
-                            )
+                                StudioTab.SHAPES -> ShapesEditorTab(
+                                    design = draft.design,
+                                    onDesignChange = onDesignChange
+                                )
 
-                            StudioTab.COLORS -> ColorsEditorTab(
-                                design = draft.design,
-                                onDesignChange = onDesignChange,
-                                onPickBackgroundPhoto = onPickBackgroundPhoto,
-                                onExtractColorsFromPhoto = { onExtractBrandColors?.invoke(false) }
-                            )
+                                StudioTab.COLORS -> ColorsEditorTab(
+                                    design = draft.design,
+                                    onDesignChange = onDesignChange,
+                                    onPickBackgroundPhoto = onPickBackgroundPhoto,
+                                    onExtractColorsFromPhoto = { onExtractBrandColors?.invoke(false) }
+                                )
 
-                            StudioTab.LOGO -> LogoEditorTab(
-                                design = draft.design,
-                                onDesignChange = onDesignChange,
-                                onPickLogoPhoto = onPickLogoPhoto,
-                                onExtractColorsFromLogo = { onExtractBrandColors?.invoke(true) }
-                            )
+                                StudioTab.LOGO -> LogoEditorTab(
+                                    design = draft.design,
+                                    onDesignChange = onDesignChange,
+                                    onPickLogoPhoto = onPickLogoPhoto,
+                                    onExtractColorsFromLogo = { onExtractBrandColors?.invoke(true) }
+                                )
 
-                            StudioTab.FRAME -> FrameAndProTab(
-                                design = draft.design,
-                                onDesignChange = onDesignChange
-                            )
+                                StudioTab.FRAME -> FrameAndProTab(
+                                    design = draft.design,
+                                    onDesignChange = onDesignChange
+                                )
+                            }
                         }
                     }
                 }

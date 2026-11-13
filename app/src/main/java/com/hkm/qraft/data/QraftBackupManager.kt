@@ -3,6 +3,7 @@ package com.hkm.qraft.data
 import com.google.gson.GsonBuilder
 import com.hkm.qraft.model.QrCreationItem
 import com.hkm.qraft.model.SavedStylePreset
+import com.hkm.qraft.model.sanitized
 
 data class QraftBackupBundle(
     val formatVersion: Int = 1,
@@ -35,10 +36,14 @@ object QraftBackupManager {
         if (rawJson.isBlank()) return null
         return runCatching {
             val parsed = prettyGson.fromJson(rawJson, QraftBackupBundle::class.java)
-            if (parsed != null && (parsed.items.isNotEmpty() || parsed.customPresets.isNotEmpty() || parsed.formatVersion >= 1)) {
+            @Suppress("UNCHECKED_CAST")
+            val rawItems = (parsed?.items as? List<QrCreationItem>)
+            @Suppress("UNCHECKED_CAST")
+            val rawPresets = (parsed?.customPresets as? List<SavedStylePreset>)
+            if (parsed != null && (!rawItems.isNullOrEmpty() || !rawPresets.isNullOrEmpty() || parsed.formatVersion >= 1)) {
                 parsed.copy(
-                    items = parsed.items.filterNotNull(),
-                    customPresets = parsed.customPresets.filterNotNull()
+                    items = rawItems.orEmpty().filterNotNull().map { it.sanitized() },
+                    customPresets = rawPresets.orEmpty().filterNotNull().map { it.sanitized() }
                 )
             } else {
                 null

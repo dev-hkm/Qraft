@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.net.Uri
+import com.google.zxing.BarcodeFormat
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.DecodeHintType
 import com.google.zxing.MultiFormatReader
@@ -20,6 +21,11 @@ import com.hkm.qraft.model.SocialPlatform
 import com.hkm.qraft.model.WifiSecurity
 import java.net.URLDecoder
 
+data class DecodedRawCode(
+    val text: String,
+    val format: BarcodeFormat
+)
+
 data class DecodedQrImport(
     val rawText: String,
     val type: QrContentType,
@@ -28,63 +34,171 @@ data class DecodedQrImport(
 )
 
 /**
- * Decodes existing QR code images from Gallery/Shared images using ZXing across inverted and
- * rotated variants, and parses structured QR payloads back into Qraft editable fields for remixing.
+ * Decodes existing QR code & barcode images from Gallery/Shared images (including high-res 8K
+ * framed exports) using multi-scale downsampling, center-ROI crops, inverted/binarizer passes,
+ * and 90-degree rotations, then parses structured payloads back into editable Qraft fields.
  */
 object QrCodeImporter {
 
     private val decodeHints = mapOf(
         DecodeHintType.TRY_HARDER to true,
-        DecodeHintType.CHARACTER_SET to "UTF-8"
+        DecodeHintType.ALSO_INVERTED to true,
+        DecodeHintType.CHARACTER_SET to "UTF-8",
+        DecodeHintType.POSSIBLE_FORMATS to listOf(
+            BarcodeFormat.QR_CODE,
+            BarcodeFormat.CODE_128,
+            BarcodeFormat.EAN_13,
+            BarcodeFormat.EAN_8,
+            BarcodeFormat.UPC_A,
+            BarcodeFormat.CODE_39,
+            BarcodeFormat.ITF,
+            BarcodeFormat.CODABAR,
+            BarcodeFormat.PDF_417,
+            BarcodeFormat.AZTEC,
+            BarcodeFormat.DATA_MATRIX
+        )
     )
 
     fun decodeFromUri(context: Context, uri: Uri): DecodedQrImport? {
-        val bitmap = LogoCatalog.loadSampledUri(context, uri, maxDim = 1400) ?: return null
-        return try {
-            decodeFromBitmap(bitmap)
-        } finally {
-            bitmap.recycle()
-        }
+        val raw = decodeFromUriAnyFormat(context, uri) ?: return null
+        return parsePayloadToImport(raw.text)
     }
 
-    fun decodeFromBitmap(bitmap: Bitmap): DecodedQrImport? {
-        decodeRawString(bitmap)?.let { return parsePayloadToImport(it) }
-
-        // High-res noisy photos sometimes binarize better when slightly downsampled
-        if (bitmap.width > 920 || bitmap.height > 920) {
-            val scale = 720f / maxOf(bitmap.width, bitmap.height).toFloat()
-            val scaled = Bitmap.createScaledBitmap(
-                bitmap,
-                (bitmap.width * scale).toInt().coerceAtLeast(160),
-                (bitmap.height * scale).toInt().coerceAtLeast(160),
-                true
-            )
-            val result = try {
-                decodeRawString(scaled)
+    fun decodeFromUriAnyFormat(context: Context, uri: Uri): DecodedRawCode? {
+        for (targetMaxDim in intArrayOf(1400, 960, 640)) {
+            val bitmap = try {
+                LogoCatalog.loadSampledUri(context, uri, maxDim = targetMaxDim)
+            } catch (_: OutOfMemoryError) {
+                null
+            } ?: continue
+            try {
+                decodeBitmapAnyFormat(bitmap)?.let { return it }
+            } catch (_: OutOfMemoryError) {
+                // Retry at next smaller sample dimension
             } finally {
-                if (scaled !== bitmap) scaled.recycle()
+                if (!bitmap.isRecycled) bitmap.recycle()
             }
-            if (result != null) return parsePayloadToImport(result)
-        }
-
-        for (angle in floatArrayOf(90f, 180f, 270f)) {
-            val matrix = Matrix().apply { postRotate(angle) }
-            val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-            val result = try {
-                decodeRawString(rotated)
-            } finally {
-                if (rotated !== bitmap) rotated.recycle()
-            }
-            if (result != null) return parsePayloadToImport(result)
         }
         return null
     }
 
-    fun decodeRawString(bitmap: Bitmap): String? {
+    fun decodeFromBitmap(bitmap: Bitmap): DecodedQrImport? {
+        val raw = decodeBitmapAnyFormat(bitmap) ?: return null
+        return parsePayloadToImport(raw.text)
+    }
+
+    fun decodeRawString(bitmap: Bitmap): String? = decodeBitmapAnyFormat(bitmap)?.text
+
+    fun decodeBitmapAnyFormat(bitmap: Bitmap): DecodedRawCode? {
+        if (bitmap.isRecycled || bitmap.width <= 0 || bitmap.height <= 0) return null
+
+        // 1. Direct pass on supplied bitmap
+        decodeSinglePass(bitmap)?.let { return it }
+
+        // 2. Multi-scale downsampling helps stylized dots / 4K / 8K PNGs fuse cleanly for ZXing
+        val maxSide = maxOf(bitmap.width, bitmap.height)
+        for (targetMax in intArrayOf(920, 620, 1280, 420)) {
+            if (kotlin.math.abs(maxSide - targetMax) < 80) continue
+            val scale = targetMax.toFloat() / maxSide.toFloat()
+            val tw = (bitmap.width * scale).toInt().coerceAtLeast(160)
+            val th = (bitmap.height * scale).toInt().coerceAtLeast(160)
+            val scaled = try {
+                Bitmap.createScaledBitmap(bitmap, tw, th, true)
+            } catch (_: OutOfMemoryError) {
+                null
+            } ?: continue
+            val result = try {
+                decodeSinglePass(scaled)
+            } finally {
+                if (scaled !== bitmap && !scaled.isRecycled) scaled.recycle()
+            }
+            if (result != null) return result
+        }
+
+        // 3. Center & upper-center ROI crops (strips out ornate 8K outer frames & bottom "SCAN HERE" pills)
+        if (bitmap.width >= 200 && bitmap.height >= 200) {
+            val cropSpecs = listOf(
+                Triple(0.09f, 0.06f, 0.82f), // removes outer frame border
+                Triple(0.17f, 0.08f, 0.66f), // isolates QR area on bottom-banner frames
+                Triple(0.17f, 0.17f, 0.66f)  // symmetric center 66%
+            )
+            for ((leftFrac, topFrac, boxFrac) in cropSpecs) {
+                val cw = (bitmap.width * boxFrac).toInt().coerceIn(96, bitmap.width)
+                val ch = (bitmap.height * boxFrac).toInt().coerceIn(96, bitmap.height)
+                val cx = (bitmap.width * leftFrac).toInt().coerceIn(0, bitmap.width - cw)
+                val cy = (bitmap.height * topFrac).toInt().coerceIn(0, bitmap.height - ch)
+                val cropped = try {
+                    Bitmap.createBitmap(bitmap, cx, cy, cw, ch)
+                } catch (_: OutOfMemoryError) {
+                    null
+                } ?: continue
+                val result = try {
+                    decodeSinglePass(cropped) ?: if (maxOf(cw, ch) > 720) {
+                        val s = 560f / maxOf(cw, ch).toFloat()
+                        val smallCrop = Bitmap.createScaledBitmap(
+                            cropped,
+                            (cw * s).toInt().coerceAtLeast(120),
+                            (ch * s).toInt().coerceAtLeast(120),
+                            true
+                        )
+                        try {
+                            decodeSinglePass(smallCrop)
+                        } finally {
+                            if (smallCrop !== cropped && !smallCrop.isRecycled) smallCrop.recycle()
+                        }
+                    } else null
+                } finally {
+                    if (cropped !== bitmap && !cropped.isRecycled) cropped.recycle()
+                }
+                if (result != null) return result
+            }
+        }
+
+        // 4. Orthogonal rotations (useful for sideways gallery screenshots or 1D barcodes)
+        val rotSource = if (maxSide > 1080) {
+            val s = 920f / maxSide.toFloat()
+            runCatching {
+                Bitmap.createScaledBitmap(
+                    bitmap,
+                    (bitmap.width * s).toInt().coerceAtLeast(160),
+                    (bitmap.height * s).toInt().coerceAtLeast(160),
+                    true
+                )
+            }.getOrNull() ?: bitmap
+        } else {
+            bitmap
+        }
+        try {
+            for (angle in floatArrayOf(90f, 180f, 270f)) {
+                val matrix = Matrix().apply { postRotate(angle) }
+                val rotated = try {
+                    Bitmap.createBitmap(rotSource, 0, 0, rotSource.width, rotSource.height, matrix, true)
+                } catch (_: OutOfMemoryError) {
+                    null
+                } ?: continue
+                val result = try {
+                    decodeSinglePass(rotated)
+                } finally {
+                    if (rotated !== rotSource && !rotated.isRecycled) rotated.recycle()
+                }
+                if (result != null) return result
+            }
+        } finally {
+            if (rotSource !== bitmap && !rotSource.isRecycled) rotSource.recycle()
+        }
+
+        return null
+    }
+
+    private fun decodeSinglePass(bitmap: Bitmap): DecodedRawCode? {
         val w = bitmap.width
         val h = bitmap.height
-        if (w <= 0 || h <= 0) return null
-        val pixels = IntArray(w * h)
+        if (w <= 0 || h <= 0 || bitmap.isRecycled) return null
+        val pixels = try {
+            IntArray(w * h)
+        } catch (_: OutOfMemoryError) {
+            return null
+        }
         bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
         val baseSource = RGBLuminanceSource(w, h, pixels)
         val qrReader = QRCodeReader()
@@ -97,15 +211,19 @@ object QrCodeImporter {
                 BinaryBitmap(GlobalHistogramBinarizer(source))
             )) {
                 try {
-                    val text = qrReader.decode(binary, decodeHints).text
-                    if (!text.isNullOrEmpty()) return text
+                    val res = qrReader.decode(binary, decodeHints)
+                    if (!res.text.isNullOrEmpty()) {
+                        return DecodedRawCode(res.text, BarcodeFormat.QR_CODE)
+                    }
                 } catch (_: Exception) {
                 } finally {
                     qrReader.reset()
                 }
                 try {
-                    val text = multiReader.decode(binary, decodeHints).text
-                    if (!text.isNullOrEmpty()) return text
+                    val res = multiReader.decode(binary, decodeHints)
+                    if (!res.text.isNullOrEmpty()) {
+                        return DecodedRawCode(res.text, res.barcodeFormat)
+                    }
                 } catch (_: NotFoundException) {
                 } catch (_: Exception) {
                 } finally {

@@ -5,20 +5,28 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.net.Uri
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.google.gson.Gson
+import com.google.zxing.BarcodeFormat
 import com.hkm.qraft.data.PresetCatalog
 import com.hkm.qraft.data.QraftBackupManager
+import com.hkm.qraft.data.QraftRepository
+import com.hkm.qraft.data.UserPreferences
 import com.hkm.qraft.model.*
-import androidx.compose.ui.test.performClick
 import com.hkm.qraft.qr.BarcodeEngine
 import com.hkm.qraft.qr.BatchSequenceExpander
 import com.hkm.qraft.qr.PaletteExtractor
@@ -33,8 +41,11 @@ import com.hkm.qraft.qr.QrPdfWriter
 import com.hkm.qraft.ui.screens.HomeScreen
 import com.hkm.qraft.ui.screens.LibraryScreen
 import com.hkm.qraft.ui.screens.ScannerScreen
+import com.hkm.qraft.ui.screens.SettingsScreen
 import com.hkm.qraft.ui.screens.StudioScreen
 import com.hkm.qraft.ui.theme.QraftTheme
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -490,11 +501,25 @@ class QraftVerificationTest {
                         onImportQr = {},
                         onOpenScanner = {}
                     )
-                    else -> ScannerScreen(
+                    4 -> ScannerScreen(
                         onBack = {},
                         onOpenInStudio = { _, _ -> },
                         onSaveToLibrary = { _, _ -> },
                         onCopyResult = {}
+                    )
+                    else -> SettingsScreen(
+                        preferences = UserPreferences(creatorName = "Khanh Minh"),
+                        savedCount = 4,
+                        archivedCount = 1,
+                        customPresetCount = 2,
+                        onBack = {},
+                        onThemeChange = {},
+                        onCreatorNameChange = {},
+                        onAutoVerifyChange = {},
+                        onDefaultFormatChange = {},
+                        onDefaultResolutionChange = {},
+                        onExportBackup = {},
+                        onImportBackup = {}
                     )
                 }
             }
@@ -514,6 +539,11 @@ class QraftVerificationTest {
         composeRule.waitForIdle()
         composeRule.onAllNodesWithText("Studio Preview v5").onFirst().assertIsDisplayed()
         savePng("qa_studio_light.png", composeRule.onRoot().captureToImage().asAndroidBitmap())
+
+        // Switch to Presets tab to verify 2-column Presets grid visually!
+        composeRule.onNodeWithText("Presets").performClick()
+        composeRule.waitForIdle()
+        savePng("qa_studio_presets_light.png", composeRule.onRoot().captureToImage().asAndroidBitmap())
 
         // Switch to Shapes tab to verify borderless shape selectors visually!
         composeRule.onNodeWithText("Shapes").performClick()
@@ -539,6 +569,16 @@ class QraftVerificationTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("Scanner").assertIsDisplayed()
         savePng("qa_scanner_light.png", composeRule.onRoot().captureToImage().asAndroidBitmap())
+
+        screenState.intValue = 5
+        darkModeState.value = false
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Settings").assertIsDisplayed()
+        savePng("qa_settings_light.png", composeRule.onRoot().captureToImage().asAndroidBitmap())
+
+        darkModeState.value = true
+        composeRule.waitForIdle()
+        savePng("qa_settings_dark.png", composeRule.onRoot().captureToImage().asAndroidBitmap())
 
         if (qaDir != null) {
             val bare = QrEngine.renderFramedExportBitmap(
@@ -566,6 +606,206 @@ class QraftVerificationTest {
             savePng("qa_barcode_preview.png", bcBmp)
             bcBmp.recycle()
         }
+    }
+
+    @Test
+    @Config(qualifiers = "w360dp-h780dp-xhdpi", fontScale = 1.0f)
+    fun studioSupportsSwitchingAllQrTypesIncludingCalendarEventWithoutCrashing() {
+        val draftState = androidx.compose.runtime.mutableStateOf(
+            StudioDraftState(
+                editingId = "alex-card",
+                codeKind = CodeKind.QR,
+                title = "Alex Designer Card",
+                type = QrContentType.APP_LINK,
+                payload = QrPayloadFields(appTarget = "com.hkm.qraft"),
+                design = PresetCatalog.starterItems().first { it.title.contains("Alex") }.design
+            )
+        )
+
+        composeRule.setContent {
+            QraftTheme(themeMode = ThemeMode.LIGHT) {
+                StudioScreen(
+                    draft = draftState.value,
+                    customPresets = emptyList(),
+                    scannability = ScannabilityReport(
+                        isScannable = true,
+                        decodedPreview = "com.hkm.qraft",
+                        contrastRatio = 10.5,
+                        matrixSize = 29,
+                        effectiveEcc = "Q"
+                    ),
+                    isVerifying = false,
+                    canUndo = false,
+                    canRedo = false,
+                    onBack = {},
+                    onTitleChange = {},
+                    onCodeKindChange = {},
+                    onTypeChange = { nextType ->
+                        draftState.value = draftState.value.copy(type = nextType)
+                    },
+                    onFieldsChange = { nextFields ->
+                        draftState.value = draftState.value.copy(payload = nextFields)
+                    },
+                    onDesignChange = {},
+                    onBarcodeChange = {},
+                    onPickLogoPhoto = {},
+                    onPickBackgroundPhoto = {},
+                    onToggleFavorite = {},
+                    onApplyPreset = {},
+                    onSaveCustomPreset = {},
+                    onDeleteCustomPreset = {},
+                    onRandomizeStyle = {},
+                    onAutoFixScannability = {},
+                    onSaveToLibrary = {},
+                    onOpenExport = {},
+                    onOpenFullscreen = {}
+                )
+            }
+        }
+
+        // Scroll & tap through every QR Content Type including Calendar Event (which previously crashed)
+        QrContentType.entries.forEach { contentType ->
+            composeRule.onNodeWithText(contentType.title).performScrollTo().performClick()
+            composeRule.waitForIdle()
+            assertEquals(contentType, draftState.value.type)
+        }
+
+        // Specifically verify Calendar Event form controls render and preset buttons update payload safely
+        composeRule.onNodeWithText("Calendar Event").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("+1h Meeting").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        assertTrue(draftState.value.payload.eventStart.isNotBlank())
+        assertTrue(draftState.value.payload.eventEnd.isNotBlank())
+    }
+
+    @Test
+    fun gsonSanitizationPreventsNullPointerCrashesOnCorruptOrLegacyJson() {
+        val malformedItemJson = """
+            {
+              "id": null,
+              "title": null,
+              "type": null,
+              "payload": { "url": null, "wifiSecurity": null, "socialPlatform": null },
+              "design": {
+                "darkBrush": null,
+                "foreground": null,
+                "background": null,
+                "logo": null,
+                "outerFrame": null,
+                "pixelStyle": null,
+                "eyeFrameStyle": null,
+                "eyeBallStyle": null,
+                "lightPixelStyle": null,
+                "errorCorrection": null
+              },
+              "barcode": null,
+              "folder": null,
+              "tags": [null, "brand", " "],
+              "isArchived": false
+            }
+        """.trimIndent()
+
+        val rawItem = Gson().fromJson(malformedItemJson, QrCreationItem::class.java)
+        val safeItem = rawItem.sanitized()
+        assertTrue(safeItem.id.isNotBlank())
+        assertNotNull(safeItem.type)
+        assertNotNull(safeItem.payload.wifiSecurity)
+        assertNotNull(safeItem.design.darkBrush.mode)
+        assertNotNull(safeItem.design.outerFrame.style)
+        assertNotNull(safeItem.resolvedBarcode().format)
+        assertEquals(listOf("brand"), safeItem.resolvedTags())
+        assertEquals("", safeItem.resolvedFolder())
+
+        // Verify encoding + SVG + Bitmap generation succeed cleanly on sanitized item
+        val encoded = QrPayloadEncoder.encode(safeItem.type, safeItem.payload)
+        assertTrue(encoded.isNotBlank())
+        assertTrue(QrEngine.exportSvg(encoded, safeItem.design).contains("<svg"))
+
+        val legacyBackupJson = """
+            {
+              "version": 3,
+              "items": [$malformedItemJson],
+              "customPresets": [{ "id": null, "name": null, "design": null }]
+            }
+        """.trimIndent()
+        val parsedBackup = QraftBackupManager.deserialize(legacyBackupJson)
+        assertNotNull(parsedBackup)
+        assertEquals(1, parsedBackup!!.items.size)
+        assertEquals(1, parsedBackup.customPresets.size)
+        assertEquals("Custom Preset", parsedBackup.customPresets.first().name)
+    }
+
+    @Test
+    fun repositorySupportsArchiveFoldersTagsAndRename() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val repo = QraftRepository(context)
+        val initial = repo.itemsFlow.first()
+        assertTrue(initial.isNotEmpty())
+        val firstId = initial.first().id
+
+        repo.renameItem(firstId, "Qraft V6 Launch Pass")
+        repo.updateItemOrganization(firstId, "Workspaces", listOf("brand", "release", "brand"))
+        repo.toggleArchived(firstId)
+
+        val updated = repo.itemsFlow.first().first { it.id == firstId }
+        assertEquals("Qraft V6 Launch Pass", updated.title)
+        assertEquals("Workspaces", updated.resolvedFolder())
+        assertEquals(listOf("brand", "release"), updated.resolvedTags())
+        assertTrue(updated.isArchived)
+
+        // Restore unarchived so subsequent runs start clean
+        repo.toggleArchived(firstId)
+        assertFalse(repo.itemsFlow.first().first { it.id == firstId }.isArchived)
+    }
+
+    @Test
+    fun highResAndFramedExportsDecodeCleanlyViaQrCodeImporter() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val cacheDir = File(context.cacheDir, "importer_test").apply { mkdirs() }
+
+        // 1. Plain 4K/8K-style bitmap export (using 4096px in Robolectric heap + bottom banner frame)
+        val framedDesign = PresetCatalog.builtInPresets.first().design.copy(
+            outerFrame = OuterFrameConfig(
+                style = OuterFrameStyle.BOTTOM_SCAN_BANNER,
+                label = "SCAN HERE",
+                frameFillColor = 0xFFFFFFFF,
+                accentColor = 0xFF111113,
+                textColor = 0xFFFFFFFF
+            )
+        )
+        val url = "https://github.com/dev-hkm/Qraft"
+        val framedBmp = QrEngine.renderFramedExportBitmap(
+            context = context,
+            data = url,
+            design = framedDesign,
+            targetWidthPx = 4096
+        )
+        val outFile = File(cacheDir, "framed_4k.png")
+        FileOutputStream(outFile).use { fos -> framedBmp.compress(Bitmap.CompressFormat.PNG, 100, fos) }
+        framedBmp.recycle()
+
+        val decodedFramed = QrCodeImporter.decodeFromUriAnyFormat(context, Uri.fromFile(outFile))
+        assertNotNull("Framed 4K PNG should decode cleanly", decodedFramed)
+        assertEquals(url, decodedFramed!!.text)
+        assertEquals(BarcodeFormat.QR_CODE, decodedFramed.format)
+
+        // 2. Barcode 4K PNG decode check
+        val barcodeSpec = BarcodeDesignSpec(
+            format = BarcodeFormatType.CODE_128,
+            data = "QRAFT-6-TEST",
+            framed = true,
+            exportWidthPx = 4096
+        )
+        val bcBmp = BarcodeEngine.renderBarcodeBitmap(barcodeSpec, targetWidthPx = 4096)
+        val bcFile = File(cacheDir, "barcode_4k.png")
+        FileOutputStream(bcFile).use { fos -> bcBmp.compress(Bitmap.CompressFormat.PNG, 100, fos) }
+        bcBmp.recycle()
+
+        val decodedBc = QrCodeImporter.decodeFromUriAnyFormat(context, Uri.fromFile(bcFile))
+        assertNotNull("Barcode PNG should decode via unified importer", decodedBc)
+        assertEquals("QRAFT-6-TEST", decodedBc!!.text)
+        assertEquals(BarcodeFormat.CODE_128, decodedBc.format)
     }
 
     @Test

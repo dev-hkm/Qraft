@@ -238,8 +238,25 @@ object QrEngine {
         design: QrDesignSpec,
         sizePx: Int
     ): Bitmap {
+        var attemptPx = sizePx.coerceIn(128, 8192)
+        while (true) {
+            try {
+                return renderQrCoreBitmapExact(context, data, design, attemptPx)
+            } catch (oom: OutOfMemoryError) {
+                if (attemptPx <= 256) throw oom
+                System.gc()
+                attemptPx = (attemptPx / 2).coerceAtLeast(256)
+            }
+        }
+    }
+
+    private fun renderQrCoreBitmapExact(
+        context: Context,
+        data: String,
+        design: QrDesignSpec,
+        clampedPx: Int
+    ): Bitmap {
         val safeData = data.ifBlank { "https://qraft.studio" }
-        val clampedPx = sizePx.coerceIn(256, 8192)
         val logoBitmap = LogoCatalog.renderLogoBitmap(
             context,
             design.logo,
@@ -369,8 +386,26 @@ object QrEngine {
         targetWidthPx: Int = design.exportSizePx,
         forceOpaqueWhiteForJpeg: Boolean = false
     ): Bitmap {
+        var attemptW = targetWidthPx.coerceIn(128, 8192)
+        while (true) {
+            try {
+                return renderFramedExportBitmapExact(context, data, design, attemptW, forceOpaqueWhiteForJpeg)
+            } catch (oom: OutOfMemoryError) {
+                if (attemptW <= 256) throw oom
+                System.gc()
+                attemptW = (attemptW / 2).coerceAtLeast(256)
+            }
+        }
+    }
+
+    private fun renderFramedExportBitmapExact(
+        context: Context,
+        data: String,
+        design: QrDesignSpec,
+        safeW: Int,
+        forceOpaqueWhiteForJpeg: Boolean
+    ): Bitmap {
         val frame = design.outerFrame
-        val safeW = targetWidthPx.coerceIn(256, 8192)
         if (frame.style == OuterFrameStyle.NONE) {
             val core = renderQrCoreBitmap(context, data, design, safeW)
             if (!forceOpaqueWhiteForJpeg || design.background.mode != BackgroundMode.TRANSPARENT) {

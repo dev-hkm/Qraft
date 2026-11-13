@@ -73,11 +73,11 @@ private val homeStripOptions = listOf(
 @Composable
 fun HomeScreen(
     creatorName: String,
-    themeMode: ThemeMode,
+    themeMode: ThemeMode = ThemeMode.SYSTEM,
     items: List<QrCreationItem>,
     selectedCategory: QrContentType?,
     onSelectCategory: (QrContentType?) -> Unit,
-    onCycleTheme: () -> Unit,
+    onCycleTheme: () -> Unit = {},
     onOpenSettings: () -> Unit,
     onOpenStudioNew: (QrContentType) -> Unit,
     onOpenStudioNewBarcode: () -> Unit = {},
@@ -91,8 +91,9 @@ fun HomeScreen(
     onImportQr: () -> Unit = {}
 ) {
     val colors = QraftThemeTokens.colors
-    val filteredItems = remember(items, selectedCategory) {
-        if (selectedCategory == null) items else items.filter { it.type == selectedCategory }
+    val activeItems = remember(items) { items.filterNot { it.isArchived } }
+    val filteredItems = remember(activeItems, selectedCategory) {
+        if (selectedCategory == null) activeItems else activeItems.filter { it.type == selectedCategory }
     }
 
     val greeting = remember(creatorName) {
@@ -145,7 +146,7 @@ fun HomeScreen(
                             )
                             Spacer(Modifier.height(2.dp))
                             Text(
-                                text = "$formattedDate • ${items.size} codes",
+                                text = "$formattedDate • ${activeItems.size} codes",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = colors.textSecondary,
                                 maxLines = 1,
@@ -154,7 +155,7 @@ fun HomeScreen(
                         }
 
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             // Live Scanner quick button
@@ -163,62 +164,33 @@ fun HomeScreen(
                                 color = colors.surface,
                                 border = BorderStroke(1.dp, colors.cardBorder),
                                 modifier = Modifier
-                                    .size(38.dp)
+                                    .size(40.dp)
                                     .appleBounceClick { onOpenScanner() }
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
                                         imageVector = Icons.Rounded.QrCodeScanner,
                                         contentDescription = "Live Scanner",
-                                        tint = colors.espressoAccent,
-                                        modifier = Modifier.size(18.dp)
+                                        tint = colors.textPrimary,
+                                        modifier = Modifier.size(19.dp)
                                     )
                                 }
                             }
 
-                            // Light / Dark / System quick toggle pill
+                            // Dedicated Settings Screen button
                             Surface(
                                 shape = CircleShape,
                                 color = colors.surface,
                                 border = BorderStroke(1.dp, colors.cardBorder),
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .appleBounceClick { onCycleTheme() }
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    AnimatedContent(
-                                        targetState = themeMode,
-                                        transitionSpec = { fadeIn().togetherWith(fadeOut()) },
-                                        label = "themeIcon"
-                                    ) { mode ->
-                                        Icon(
-                                            imageVector = when (mode) {
-                                                ThemeMode.LIGHT -> Icons.Rounded.LightMode
-                                                ThemeMode.DARK -> Icons.Rounded.DarkMode
-                                                ThemeMode.SYSTEM -> Icons.Rounded.BrightnessAuto
-                                            },
-                                            contentDescription = "Switch theme",
-                                            tint = colors.espressoAccent,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                }
-                            }
-
-                            // Studio Preferences Circle
-                            Surface(
-                                shape = CircleShape,
-                                color = colors.heroBannerBg,
-                                border = BorderStroke(1.2.dp, colors.cardBorder),
                                 modifier = Modifier
                                     .size(40.dp)
                                     .appleBounceClick { onOpenSettings() }
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
-                                        imageVector = Icons.Rounded.QrCode2,
-                                        contentDescription = "Studio Preferences",
-                                        tint = colors.espressoAccent,
+                                        imageVector = Icons.Rounded.Settings,
+                                        contentDescription = "Settings",
+                                        tint = colors.textPrimary,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
@@ -496,7 +468,10 @@ fun HomeScreen(
                             Button(
                                 onClick = { onOpenStudioNew(selectedCategory ?: QrContentType.URL) },
                                 shape = RoundedCornerShape(50),
-                                colors = ButtonDefaults.buttonColors(containerColor = colors.espressoAccent)
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = colors.espressoAccent,
+                                    contentColor = colors.espressoAccentContent
+                                )
                             ) {
                                 Text("Create Now")
                             }
