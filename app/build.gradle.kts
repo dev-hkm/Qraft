@@ -34,8 +34,8 @@ android {
         applicationId = "com.hkm.qraft"
         minSdk = 24
         targetSdk = 36
-        versionCode = 4
-        versionName = "4.0.0"
+        versionCode = 5
+        versionName = "5.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -105,6 +105,10 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.qrose)
     implementation(libs.zxing.core)
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
 
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)

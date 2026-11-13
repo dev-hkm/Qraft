@@ -3,6 +3,7 @@ package com.hkm.qraft.qr
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas as AndroidCanvas
+import android.graphics.DashPathEffect
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.RadialGradient
@@ -20,6 +21,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.unit.Density
@@ -53,7 +55,8 @@ object QrEngine {
                 design.pixelStyle in setOf(
                     QrPixelStyle.STAR,
                     QrPixelStyle.HEART,
-                    QrPixelStyle.CROSS
+                    QrPixelStyle.CROSS,
+                    QrPixelStyle.RING
                 ) -> QrErrorCorrectionLevel.MediumHigh
                 else -> QrErrorCorrectionLevel.Medium
             }
@@ -236,31 +239,21 @@ object QrEngine {
         sizePx: Int
     ): Bitmap {
         val safeData = data.ifBlank { "https://qraft.studio" }
-        val logoBitmap = LogoCatalog.renderLogoBitmap(context, design.logo, outputPx = (sizePx * 0.36f).roundToInt().coerceAtLeast(120))
+        val clampedPx = sizePx.coerceIn(256, 8192)
+        val logoBitmap = LogoCatalog.renderLogoBitmap(
+            context,
+            design.logo,
+            outputPx = (clampedPx * 0.28f).roundToInt().coerceIn(120, 1024)
+        )
         val logoPainter = logoBitmap?.let { BitmapPainter(it.asImageBitmap()) }
         val options = buildQrOptions(design, logoPainter)
 
         val painter = QrCodePainter(data = safeData, options = options)
 
-        val quietPx = (sizePx * design.quietZonePadding.coerceIn(0f, 0.24f)).roundToInt()
-        val innerSize = (sizePx - quietPx * 2).coerceAtLeast(64)
+        val quietPx = (clampedPx * design.quietZonePadding.coerceIn(0f, 0.24f)).roundToInt()
+        val innerSize = (clampedPx - quietPx * 2).coerceAtLeast(64)
 
-        val qrAndroidBitmap = Bitmap.createBitmap(innerSize, innerSize, Bitmap.Config.ARGB_8888)
-        val qrImageBitmap = qrAndroidBitmap.asImageBitmap()
-        val composeCanvas = androidx.compose.ui.graphics.Canvas(qrImageBitmap)
-        val drawScope = CanvasDrawScope()
-        drawScope.draw(
-            density = Density(1f),
-            layoutDirection = LayoutDirection.Ltr,
-            canvas = composeCanvas,
-            size = Size(innerSize.toFloat(), innerSize.toFloat())
-        ) {
-            with(painter) {
-                draw(size)
-            }
-        }
-
-        val output = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+        val output = Bitmap.createBitmap(clampedPx, clampedPx, Bitmap.Config.ARGB_8888)
         val canvas = AndroidCanvas(output)
 
         when (design.background.mode) {
@@ -271,25 +264,25 @@ object QrEngine {
             BackgroundMode.GRADIENT -> {
                 val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                     style = Paint.Style.FILL
-                    val shader = buildNativeShader(design.background.brush, sizePx.toFloat(), sizePx.toFloat())
+                    val shader = buildNativeShader(design.background.brush, clampedPx.toFloat(), clampedPx.toFloat())
                     if (shader != null) {
                         this.shader = shader
                     } else {
                         color = design.background.brush.primaryColor.toInt()
                     }
                 }
-                canvas.drawRect(0f, 0f, sizePx.toFloat(), sizePx.toFloat(), bgPaint)
+                canvas.drawRect(0f, 0f, clampedPx.toFloat(), clampedPx.toFloat(), bgPaint)
             }
             BackgroundMode.PHOTO -> {
                 val photo = design.background.photoUri?.let {
-                    LogoCatalog.loadSampledUri(context, Uri.parse(it), sizePx.coerceAtMost(1600))
+                    LogoCatalog.loadSampledUri(context, Uri.parse(it), clampedPx.coerceAtMost(2048))
                 }
                 if (photo != null) {
                     val side = min(photo.width, photo.height)
                     val left = (photo.width - side) / 2
                     val top = (photo.height - side) / 2
                     val src = android.graphics.Rect(left, top, left + side, top + side)
-                    val dst = android.graphics.Rect(0, 0, sizePx, sizePx)
+                    val dst = android.graphics.Rect(0, 0, clampedPx, clampedPx)
                     canvas.drawBitmap(photo, src, dst, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
                     photo.recycle()
                 } else {
@@ -305,17 +298,25 @@ object QrEngine {
                         (scrimColor.blue * 255).roundToInt()
                     )
                 }
-                canvas.drawRect(0f, 0f, sizePx.toFloat(), sizePx.toFloat(), scrimPaint)
+                canvas.drawRect(0f, 0f, clampedPx.toFloat(), clampedPx.toFloat(), scrimPaint)
             }
         }
 
-        canvas.drawBitmap(
-            qrAndroidBitmap,
-            quietPx.toFloat(),
-            quietPx.toFloat(),
-            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-        )
-        qrAndroidBitmap.recycle()
+        // Single-bitmap compose draw: avoids dual 268MB buffer allocation at 8K (8192px)
+        val composeCanvas = androidx.compose.ui.graphics.Canvas(output.asImageBitmap())
+        val drawScope = CanvasDrawScope()
+        drawScope.draw(
+            density = Density(1f),
+            layoutDirection = LayoutDirection.Ltr,
+            canvas = composeCanvas,
+            size = Size(clampedPx.toFloat(), clampedPx.toFloat())
+        ) {
+            translate(left = quietPx.toFloat(), top = quietPx.toFloat()) {
+                with(painter) {
+                    draw(Size(innerSize.toFloat(), innerSize.toFloat()))
+                }
+            }
+        }
         logoBitmap?.recycle()
         return output
     }
@@ -369,12 +370,13 @@ object QrEngine {
         forceOpaqueWhiteForJpeg: Boolean = false
     ): Bitmap {
         val frame = design.outerFrame
+        val safeW = targetWidthPx.coerceIn(256, 8192)
         if (frame.style == OuterFrameStyle.NONE) {
-            val core = renderQrCoreBitmap(context, data, design, targetWidthPx)
+            val core = renderQrCoreBitmap(context, data, design, safeW)
             if (!forceOpaqueWhiteForJpeg || design.background.mode != BackgroundMode.TRANSPARENT) {
                 return core
             }
-            val opaque = Bitmap.createBitmap(targetWidthPx, targetWidthPx, Bitmap.Config.ARGB_8888)
+            val opaque = Bitmap.createBitmap(safeW, safeW, Bitmap.Config.ARGB_8888)
             val c = AndroidCanvas(opaque)
             c.drawColor(0xFFFFFFFF.toInt())
             c.drawBitmap(core, 0f, 0f, null)
@@ -382,26 +384,30 @@ object QrEngine {
             return opaque
         }
 
-        val w = targetWidthPx
-        val hasSubtitle = frame.style == OuterFrameStyle.WARM_POSTER && frame.subtitle.isNotBlank()
+        val w = safeW
+        val hasSubtitle = (frame.style == OuterFrameStyle.WARM_POSTER || frame.style == OuterFrameStyle.TICKET_STUB) &&
+            frame.subtitle.isNotBlank()
         val extraBottom = when (frame.style) {
             OuterFrameStyle.BOTTOM_SCAN_BANNER,
-            OuterFrameStyle.GLASS_CARD -> (w * 0.19f).roundToInt()
+            OuterFrameStyle.GLASS_CARD,
+            OuterFrameStyle.CORNER_BRACKET,
+            OuterFrameStyle.NEON_GLOW,
+            OuterFrameStyle.CIRCULAR_STAMP -> (w * 0.19f).roundToInt()
+            OuterFrameStyle.TICKET_STUB -> (w * (if (hasSubtitle) 0.24f else 0.20f)).roundToInt()
+            OuterFrameStyle.MINIMAL_OUTLINE -> (w * 0.13f).roundToInt()
             OuterFrameStyle.SPEECH_BUBBLE -> (w * 0.25f).roundToInt()
-            OuterFrameStyle.POLAROID_STAMP,
-            OuterFrameStyle.CORNER_BRACKET -> (w * 0.19f).roundToInt()
+            OuterFrameStyle.POLAROID_STAMP -> (w * 0.19f).roundToInt()
             OuterFrameStyle.WARM_POSTER -> (w * (if (hasSubtitle) 0.24f else 0.19f)).roundToInt()
             OuterFrameStyle.DOUBLE_PILL -> (w * 0.19f).roundToInt()
-            OuterFrameStyle.TOP_BADGE_CARD -> (w * 0.13f).roundToInt()
-            else -> (w * 0.04f).roundToInt()
+            OuterFrameStyle.TOP_BADGE_CARD,
+            OuterFrameStyle.SCAN_BAR_HEADER -> (w * 0.13f).roundToInt()
+            else -> (w * 0.045f).roundToInt()
         }
-        val extraTop = if (
-            frame.style == OuterFrameStyle.TOP_BADGE_CARD ||
-            frame.style == OuterFrameStyle.DOUBLE_PILL
-        ) {
-            (w * 0.13f).roundToInt()
-        } else {
-            0
+        val extraTop = when (frame.style) {
+            OuterFrameStyle.TOP_BADGE_CARD,
+            OuterFrameStyle.DOUBLE_PILL,
+            OuterFrameStyle.SCAN_BAR_HEADER -> (w * 0.135f).roundToInt()
+            else -> 0
         }
 
         val totalH = w + extraBottom + extraTop
@@ -418,6 +424,10 @@ object QrEngine {
         val cardRect = RectF(margin, margin, w - margin, cardBottom)
         val cornerR = (frame.cornerRadiusDp / 360f) * w
 
+        val cardPath = android.graphics.Path().apply {
+            addRoundRect(cardRect, cornerR, cornerR, android.graphics.Path.Direction.CW)
+        }
+
         val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
             color = if (frame.style == OuterFrameStyle.GLASS_CARD) {
@@ -426,28 +436,113 @@ object QrEngine {
                 frame.frameFillColor.toInt()
             }
         }
-        canvas.drawRoundRect(cardRect, cornerR, cornerR, cardPaint)
+        canvas.drawPath(cardPath, cardPaint)
 
-        if (frame.style == OuterFrameStyle.GLASS_CARD) {
-            val sheenPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                style = Paint.Style.FILL
-                shader = LinearGradient(
-                    cardRect.left, cardRect.top, cardRect.left, cardRect.bottom,
-                    0x44FFFFFF, 0x05FFFFFF, Shader.TileMode.CLAMP
-                )
+        // Frame perimeter decorations
+        when (frame.style) {
+            OuterFrameStyle.GLASS_CARD -> {
+                val sheenPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.FILL
+                    shader = LinearGradient(
+                        cardRect.left, cardRect.top, cardRect.left, cardRect.bottom,
+                        0x44FFFFFF, 0x05FFFFFF, Shader.TileMode.CLAMP
+                    )
+                }
+                canvas.drawRoundRect(cardRect, cornerR, cornerR, sheenPaint)
+                val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.STROKE
+                    strokeWidth = max(w * 0.008f, 3f)
+                    shader = LinearGradient(
+                        cardRect.left, cardRect.top, cardRect.right, cardRect.bottom,
+                        0xCCFFFFFF.toInt(),
+                        ((frame.accentColor and 0x00FFFFFFL) or 0x55000000L).toInt(),
+                        Shader.TileMode.CLAMP
+                    )
+                }
+                canvas.drawRoundRect(cardRect, cornerR, cornerR, rimPaint)
             }
-            canvas.drawRoundRect(cardRect, cornerR, cornerR, sheenPaint)
-            val rimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                style = Paint.Style.STROKE
-                strokeWidth = max(w * 0.008f, 3f)
-                shader = LinearGradient(
-                    cardRect.left, cardRect.top, cardRect.right, cardRect.bottom,
-                    0xCCFFFFFF.toInt(),
-                    ((frame.accentColor and 0x00FFFFFFL) or 0x55000000L).toInt(),
-                    Shader.TileMode.CLAMP
-                )
+            OuterFrameStyle.MINIMAL_OUTLINE -> {
+                val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.STROKE
+                    strokeWidth = max(w * 0.0045f, 2f)
+                    color = frame.accentColor.toInt()
+                }
+                canvas.drawRoundRect(cardRect, cornerR, cornerR, linePaint)
             }
-            canvas.drawRoundRect(cardRect, cornerR, cornerR, rimPaint)
+            OuterFrameStyle.NEON_GLOW -> {
+                val glowStroke = max(w * 0.026f, 12f)
+                val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.STROKE
+                    strokeWidth = glowStroke
+                    alpha = 64
+                    color = frame.accentColor.toInt()
+                }
+                val innerBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.STROKE
+                    strokeWidth = max(w * 0.011f, 5f)
+                    shader = LinearGradient(
+                        cardRect.left, cardRect.top, cardRect.right, cardRect.bottom,
+                        frame.accentColor.toInt(), frame.accentSecondaryColor.toInt(), Shader.TileMode.CLAMP
+                    )
+                }
+                canvas.drawRoundRect(cardRect, cornerR, cornerR, glowPaint)
+                canvas.drawRoundRect(cardRect, cornerR, cornerR, innerBorder)
+            }
+            OuterFrameStyle.SCAN_BAR_HEADER -> {
+                val barH = w * 0.145f
+                val saveHdr = canvas.save()
+                canvas.clipPath(cardPath)
+                val hdrPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.FILL
+                    color = frame.accentColor.toInt()
+                }
+                canvas.drawRect(cardRect.left, cardRect.top, cardRect.right, cardRect.top + barH, hdrPaint)
+                val hdrText = frame.label.trim().ifBlank { "SCAN ME" }
+                val txtPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = frame.textColor.toInt()
+                    textAlign = Paint.Align.CENTER
+                    typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                    letterSpacing = 0.09f
+                }
+                fitTextSize(txtPaint, hdrText, cardRect.width() * 0.78f, w * 0.048f, w * 0.024f)
+                val fm = txtPaint.fontMetrics
+                canvas.drawText(
+                    hdrText,
+                    cardRect.centerX(),
+                    cardRect.top + barH / 2f - (fm.ascent + fm.descent) / 2f,
+                    txtPaint
+                )
+                canvas.restoreToCount(saveHdr)
+            }
+            OuterFrameStyle.GRADIENT_BORDER -> {
+                val strokeW = max(w * 0.022f, 12f)
+                val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.STROKE
+                    strokeWidth = strokeW
+                    shader = LinearGradient(
+                        0f, 0f, w.toFloat(), cardBottom,
+                        frame.accentColor.toInt(),
+                        frame.accentSecondaryColor.toInt(),
+                        Shader.TileMode.CLAMP
+                    )
+                }
+                val insetRect = RectF(
+                    cardRect.left + strokeW / 2f,
+                    cardRect.top + strokeW / 2f,
+                    cardRect.right - strokeW / 2f,
+                    cardRect.bottom - strokeW / 2f
+                )
+                canvas.drawRoundRect(insetRect, cornerR, cornerR, borderPaint)
+            }
+            else -> if (frame.borderThicknessDp > 0f) {
+                val strokeW = (frame.borderThicknessDp / 360f) * w
+                val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.STROKE
+                    strokeWidth = strokeW
+                    color = frame.accentColor.toInt()
+                }
+                canvas.drawRoundRect(cardRect, cornerR, cornerR, borderPaint)
+            }
         }
 
         if (frame.style == OuterFrameStyle.SPEECH_BUBBLE) {
@@ -462,39 +557,10 @@ object QrEngine {
             canvas.drawPath(tailPath, cardPaint)
         }
 
-        if (frame.style == OuterFrameStyle.GRADIENT_BORDER) {
-            val strokeW = max(w * 0.022f, 12f)
-            val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                style = Paint.Style.STROKE
-                strokeWidth = strokeW
-                shader = LinearGradient(
-                    0f, 0f, w.toFloat(), cardBottom,
-                    frame.accentColor.toInt(),
-                    frame.accentSecondaryColor.toInt(),
-                    Shader.TileMode.CLAMP
-                )
-            }
-            val insetRect = RectF(
-                cardRect.left + strokeW / 2f,
-                cardRect.top + strokeW / 2f,
-                cardRect.right - strokeW / 2f,
-                cardRect.bottom - strokeW / 2f
-            )
-            canvas.drawRoundRect(insetRect, cornerR, cornerR, borderPaint)
-        } else if (frame.borderThicknessDp > 0f) {
-            val strokeW = (frame.borderThicknessDp / 360f) * w
-            val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                style = Paint.Style.STROKE
-                strokeWidth = strokeW
-                color = frame.accentColor.toInt()
-            }
-            canvas.drawRoundRect(cardRect, cornerR, cornerR, borderPaint)
-        }
-
-        val qrPad = w * 0.085f
-        val qrSize = (w - qrPad * 2f).roundToInt()
+        val qrPad = w * frame.effectivePaddingFraction()
+        val qrSize = (w - qrPad * 2f).roundToInt().coerceAtLeast(64)
         val qrTop = (margin + extraTop + w * 0.045f).roundToInt()
-        val qrCorner = cornerR * 0.65f
+        val qrCorner = if (frame.style == OuterFrameStyle.CIRCULAR_STAMP) qrSize / 2f else cornerR * 0.65f
         val qrRect = RectF(qrPad, qrTop.toFloat(), qrPad + qrSize, qrTop + qrSize.toFloat())
         if (design.matrixShadowEnabled) {
             val outerGlow = RectF(
@@ -537,31 +603,105 @@ object QrEngine {
                 color = frame.accentColor.toInt()
             }
             val bp = android.graphics.Path().apply {
-                // Top-left
                 moveTo(left, top + leg); lineTo(left, top); lineTo(left + leg, top)
-                // Top-right
                 moveTo(right - leg, top); lineTo(right, top); lineTo(right, top + leg)
-                // Bottom-left
                 moveTo(left, bottom - leg); lineTo(left, bottom); lineTo(left + leg, bottom)
-                // Bottom-right
                 moveTo(right - leg, bottom); lineTo(right, bottom); lineTo(right, bottom - leg)
             }
             canvas.drawPath(bp, bracketPaint)
         }
-        val qrCore = renderQrCoreBitmap(context, data, design, qrSize)
+        if (frame.style == OuterFrameStyle.CIRCULAR_STAMP) {
+            val sealRadius = qrSize / 2f + w * 0.020f
+            val ringPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = max(w * 0.011f, 4f)
+                color = frame.accentColor.toInt()
+            }
+            canvas.drawCircle(qrRect.centerX(), qrRect.centerY(), sealRadius, ringPaint)
+        }
+
+        // Render QR core directly onto `canvas` inside `qrRect` — zero double-bitmap OOM overhead at 8K!
+        val safeData = data.ifBlank { "https://qraft.studio" }
+        val logoBitmap = LogoCatalog.renderLogoBitmap(
+            context,
+            design.logo,
+            outputPx = (qrSize * 0.28f).roundToInt().coerceIn(120, 1024)
+        )
+        val logoPainter = logoBitmap?.let { BitmapPainter(it.asImageBitmap()) }
+        val options = buildQrOptions(design, logoPainter)
+        val painter = QrCodePainter(data = safeData, options = options)
+        val quietPx = (qrSize * design.quietZonePadding.coerceIn(0f, 0.24f)).roundToInt()
+        val innerSize = (qrSize - quietPx * 2).coerceAtLeast(64)
+
         val qrSave = canvas.save()
         val qrClip = android.graphics.Path().apply {
-            addRoundRect(
-                qrRect,
-                qrCorner,
-                qrCorner,
-                android.graphics.Path.Direction.CW
-            )
+            addRoundRect(qrRect, qrCorner, qrCorner, android.graphics.Path.Direction.CW)
         }
         canvas.clipPath(qrClip)
-        canvas.drawBitmap(qrCore, qrPad, qrTop.toFloat(), null)
+        when (design.background.mode) {
+            BackgroundMode.TRANSPARENT -> Unit
+            BackgroundMode.SOLID -> {
+                canvas.drawRect(qrRect, Paint().apply { color = design.background.brush.primaryColor.toInt() })
+            }
+            BackgroundMode.GRADIENT -> {
+                canvas.save()
+                canvas.translate(qrRect.left, qrRect.top)
+                val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.FILL
+                    val shader = buildNativeShader(design.background.brush, qrSize.toFloat(), qrSize.toFloat())
+                    if (shader != null) this.shader = shader else color = design.background.brush.primaryColor.toInt()
+                }
+                canvas.drawRect(0f, 0f, qrSize.toFloat(), qrSize.toFloat(), bgPaint)
+                canvas.restore()
+            }
+            BackgroundMode.PHOTO -> {
+                val photo = design.background.photoUri?.let {
+                    LogoCatalog.loadSampledUri(context, Uri.parse(it), qrSize.coerceAtMost(2048))
+                }
+                if (photo != null) {
+                    val side = min(photo.width, photo.height)
+                    val left = (photo.width - side) / 2
+                    val top = (photo.height - side) / 2
+                    canvas.drawBitmap(
+                        photo,
+                        android.graphics.Rect(left, top, left + side, top + side),
+                        qrRect,
+                        Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+                    )
+                    photo.recycle()
+                } else {
+                    canvas.drawRect(qrRect, Paint().apply { color = 0xFFFFFFFF.toInt() })
+                }
+                val scrimColor = Color(design.background.photoOverlayColor)
+                    .copy(alpha = design.background.photoOverlayAlpha.coerceIn(0f, 0.95f))
+                canvas.drawRect(
+                    qrRect,
+                    Paint().apply {
+                        color = android.graphics.Color.argb(
+                            (scrimColor.alpha * 255).roundToInt(),
+                            (scrimColor.red * 255).roundToInt(),
+                            (scrimColor.green * 255).roundToInt(),
+                            (scrimColor.blue * 255).roundToInt()
+                        )
+                    }
+                )
+            }
+        }
+        val composeCanvas = androidx.compose.ui.graphics.Canvas(bitmap.asImageBitmap())
+        CanvasDrawScope().draw(
+            density = Density(1f),
+            layoutDirection = LayoutDirection.Ltr,
+            canvas = composeCanvas,
+            size = Size(w.toFloat(), totalH.toFloat())
+        ) {
+            translate(left = qrPad + quietPx, top = qrTop.toFloat() + quietPx) {
+                with(painter) {
+                    draw(Size(innerSize.toFloat(), innerSize.toFloat()))
+                }
+            }
+        }
         canvas.restoreToCount(qrSave)
-        qrCore.recycle()
+        logoBitmap?.recycle()
 
         val label = frame.label.trim().ifBlank { "SCAN ME" }
         val bottomText = if (frame.style == OuterFrameStyle.DOUBLE_PILL && frame.subtitle.isNotBlank()) {
@@ -607,12 +747,53 @@ object QrEngine {
             OuterFrameStyle.BOTTOM_SCAN_BANNER,
             OuterFrameStyle.SPEECH_BUBBLE,
             OuterFrameStyle.GLASS_CARD,
-            OuterFrameStyle.CORNER_BRACKET -> {
+            OuterFrameStyle.CORNER_BRACKET,
+            OuterFrameStyle.NEON_GLOW,
+            OuterFrameStyle.CIRCULAR_STAMP -> {
                 val pillW = w * 0.64f
                 val pillH = w * 0.112f
                 val pillLeft = (w - pillW) / 2f
                 val pillTop = qrTop + qrSize + w * 0.042f
+                drawPillBadge(
+                    label,
+                    RectF(pillLeft, pillTop, pillLeft + pillW, pillTop + pillH),
+                    frame.style == OuterFrameStyle.NEON_GLOW
+                )
+            }
+            OuterFrameStyle.TICKET_STUB -> {
+                val seamY = qrTop + qrSize + w * 0.030f
+                val dashPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.STROKE
+                    strokeWidth = max(w * 0.005f, 2f)
+                    color = frame.accentColor.toInt()
+                    alpha = 110
+                    pathEffect = DashPathEffect(floatArrayOf(w * 0.024f, w * 0.016f), 0f)
+                }
+                canvas.drawLine(cardRect.left + w * 0.06f, seamY, cardRect.right - w * 0.06f, seamY, dashPaint)
+                val pillW = w * 0.62f
+                val pillH = w * 0.104f
+                val pillLeft = (w - pillW) / 2f
+                val pillTop = seamY + w * 0.026f
                 drawPillBadge(label, RectF(pillLeft, pillTop, pillLeft + pillW, pillTop + pillH), false)
+                if (hasSubtitle) {
+                    val subPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = frame.accentColor.toInt()
+                        textAlign = Paint.Align.CENTER
+                        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                    }
+                    fitTextSize(subPaint, frame.subtitle.trim(), w * 0.80f, w * 0.036f, w * 0.020f)
+                    canvas.drawText(frame.subtitle.trim(), w / 2f, pillTop + pillH + w * 0.046f, subPaint)
+                }
+            }
+            OuterFrameStyle.MINIMAL_OUTLINE -> {
+                val capPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = frame.accentColor.toInt()
+                    textAlign = Paint.Align.CENTER
+                    typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                    letterSpacing = 0.14f
+                }
+                fitTextSize(capPaint, label, w * 0.80f, w * 0.042f, w * 0.022f)
+                canvas.drawText(label, w / 2f, qrTop + qrSize + w * 0.088f, capPaint)
             }
             OuterFrameStyle.WARM_POSTER -> {
                 val pillW = w * 0.66f
@@ -661,7 +842,8 @@ object QrEngine {
                 val y = qrTop + qrSize + w * 0.115f
                 canvas.drawText(label, w / 2f, y, stampPaint)
             }
-            else -> Unit
+            OuterFrameStyle.SCAN_BAR_HEADER -> Unit
+            OuterFrameStyle.GRADIENT_BORDER, OuterFrameStyle.NONE, OuterFrameStyle.CLEAN_CARD -> Unit
         }
 
         return bitmap
@@ -774,26 +956,37 @@ object QrEngine {
 
         val frame = design.outerFrame
         val framed = frame.style != OuterFrameStyle.NONE
-        val hasSubtitle = frame.style == OuterFrameStyle.WARM_POSTER && frame.subtitle.isNotBlank()
+        val hasSubtitle = (frame.style == OuterFrameStyle.WARM_POSTER || frame.style == OuterFrameStyle.TICKET_STUB) &&
+            frame.subtitle.isNotBlank()
         val extraBottom = when (frame.style) {
             OuterFrameStyle.NONE -> 0f
             OuterFrameStyle.BOTTOM_SCAN_BANNER,
             OuterFrameStyle.GLASS_CARD,
-            OuterFrameStyle.CORNER_BRACKET -> innerQrDim * 0.20f
+            OuterFrameStyle.CORNER_BRACKET,
+            OuterFrameStyle.NEON_GLOW,
+            OuterFrameStyle.CIRCULAR_STAMP -> innerQrDim * 0.20f
+            OuterFrameStyle.TICKET_STUB -> innerQrDim * (if (hasSubtitle) 0.25f else 0.21f)
+            OuterFrameStyle.MINIMAL_OUTLINE -> innerQrDim * 0.14f
             OuterFrameStyle.SPEECH_BUBBLE -> innerQrDim * 0.27f
             OuterFrameStyle.POLAROID_STAMP -> innerQrDim * 0.20f
             OuterFrameStyle.WARM_POSTER -> innerQrDim * (if (hasSubtitle) 0.25f else 0.20f)
             OuterFrameStyle.DOUBLE_PILL -> innerQrDim * 0.20f
-            OuterFrameStyle.TOP_BADGE_CARD -> innerQrDim * 0.14f
-            else -> innerQrDim * 0.06f
+            OuterFrameStyle.TOP_BADGE_CARD,
+            OuterFrameStyle.SCAN_BAR_HEADER -> innerQrDim * 0.14f
+            OuterFrameStyle.CLEAN_CARD,
+            OuterFrameStyle.GRADIENT_BORDER -> innerQrDim * 0.06f
         }
-        val extraTop = if (frame.style == OuterFrameStyle.TOP_BADGE_CARD || frame.style == OuterFrameStyle.DOUBLE_PILL) {
+        val extraTop = if (
+            frame.style == OuterFrameStyle.TOP_BADGE_CARD ||
+            frame.style == OuterFrameStyle.DOUBLE_PILL ||
+            frame.style == OuterFrameStyle.SCAN_BAR_HEADER
+        ) {
             innerQrDim * 0.14f
         } else {
             0f
         }
         val cardMargin = if (framed) innerQrDim * 0.045f else 0f
-        val qrPad = if (framed) innerQrDim * 0.09f else 0f
+        val qrPad = if (framed) innerQrDim * frame.effectivePaddingFraction() else 0f
         val tailH = if (frame.style == OuterFrameStyle.SPEECH_BUBBLE) innerQrDim * 0.065f else 0f
         val totalW = innerQrDim + qrPad * 2f
         val qrOriginX = qrPad
@@ -819,13 +1012,20 @@ object QrEngine {
         if (design.background.mode == BackgroundMode.GRADIENT) {
             appendSvgBrushDef(sb, "qrBgFill", design.background.brush)
         }
-        if (frame.style == OuterFrameStyle.GRADIENT_BORDER || frame.style == OuterFrameStyle.WARM_POSTER) {
+        if (frame.style == OuterFrameStyle.GRADIENT_BORDER ||
+            frame.style == OuterFrameStyle.WARM_POSTER ||
+            frame.style == OuterFrameStyle.NEON_GLOW
+        ) {
             sb.appendLine("""    <linearGradient id="qrFrameAccent" x1="0%" y1="0%" x2="100%" y2="0%">""")
             sb.appendLine("""      <stop offset="0%" stop-color="${toSvgHex(frame.accentColor)}"/>""")
             sb.appendLine("""      <stop offset="100%" stop-color="${toSvgHex(frame.accentSecondaryColor)}"/>""")
             sb.appendLine("""    </linearGradient>""")
         }
-        val qrCorner = ((frame.cornerRadiusDp / 360f) * totalW * 0.65f).coerceAtLeast(16f)
+        val qrCorner = if (frame.style == OuterFrameStyle.CIRCULAR_STAMP) {
+            innerQrDim / 2f
+        } else {
+            ((frame.cornerRadiusDp / 360f) * totalW * 0.65f).coerceAtLeast(16f)
+        }
         sb.appendLine("""    <clipPath id="qrCoreClip">""")
         sb.appendLine("""      <rect x="${fmt(qrOriginX)}" y="${fmt(qrOriginY)}" width="${fmt(innerQrDim)}" height="${fmt(innerQrDim)}" rx="${fmt(qrCorner)}"/>""")
         sb.appendLine("""    </clipPath>""")
@@ -846,20 +1046,39 @@ object QrEngine {
                     """  <polygon points="${fmt(cx - tailHalfW)},${fmt(cardBottom - 2f)} ${fmt(cx + tailHalfW)},${fmt(cardBottom - 2f)} ${fmt(cx)},${fmt(cardBottom + tailH)}" fill="$cardFill"/>"""
                 )
             }
-            if (frame.style == OuterFrameStyle.GRADIENT_BORDER) {
-                val strokeW = max(totalW * 0.022f, 12f)
+            if (frame.style == OuterFrameStyle.GRADIENT_BORDER || frame.style == OuterFrameStyle.NEON_GLOW) {
+                val strokeW = max(totalW * (if (frame.style == OuterFrameStyle.NEON_GLOW) 0.012f else 0.022f), 8f)
                 sb.appendLine(
                     """  <rect x="${fmt(cardMargin + strokeW / 2f)}" y="${fmt(cardMargin + strokeW / 2f)}" width="${fmt(totalW - cardMargin * 2f - strokeW)}" height="${fmt(cardBottom - cardMargin - strokeW)}" rx="${fmt(cardCorner)}" fill="none" stroke="url(#qrFrameAccent)" stroke-width="${fmt(strokeW)}"/>"""
+                )
+            } else if (frame.style == OuterFrameStyle.MINIMAL_OUTLINE) {
+                val strokeW = max(totalW * 0.0045f, 2f)
+                sb.appendLine(
+                    """  <rect x="${fmt(cardMargin)}" y="${fmt(cardMargin)}" width="${fmt(totalW - cardMargin * 2f)}" height="${fmt(cardBottom - cardMargin)}" rx="${fmt(cardCorner)}" fill="none" stroke="${toSvgHex(frame.accentColor)}" stroke-width="${fmt(strokeW)}"/>"""
                 )
             } else if (frame.style == OuterFrameStyle.GLASS_CARD) {
                 val strokeW = max(totalW * 0.008f, 3f)
                 sb.appendLine(
                     """  <rect x="${fmt(cardMargin + strokeW / 2f)}" y="${fmt(cardMargin + strokeW / 2f)}" width="${fmt(totalW - cardMargin * 2f - strokeW)}" height="${fmt(cardBottom - cardMargin - strokeW)}" rx="${fmt(cardCorner)}" fill="none" stroke="${toSvgHex(frame.accentColor)}" stroke-opacity="0.35" stroke-width="${fmt(strokeW)}"/>"""
                 )
+            } else if (frame.style == OuterFrameStyle.SCAN_BAR_HEADER) {
+                val barH = totalW * 0.145f
+                val safeHdr = escapeXml(frame.label.trim().ifBlank { "SCAN ME" })
+                sb.appendLine(
+                    """  <rect x="${fmt(cardMargin)}" y="${fmt(cardMargin)}" width="${fmt(totalW - cardMargin * 2f)}" height="${fmt(barH)}" rx="${fmt(cardCorner)}" fill="${toSvgHex(frame.accentColor)}"/>"""
+                )
+                sb.appendLine(
+                    """  <text x="${fmt(totalW / 2f)}" y="${fmt(cardMargin + barH * 0.65f)}" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="${fmt(totalW * 0.044f)}" letter-spacing="1.6" fill="${toSvgHex(frame.textColor)}">$safeHdr</text>"""
+                )
             } else if (frame.borderThicknessDp > 0f) {
                 val strokeW = (frame.borderThicknessDp / 360f) * totalW
                 sb.appendLine(
                     """  <rect x="${fmt(cardMargin)}" y="${fmt(cardMargin)}" width="${fmt(totalW - cardMargin * 2f)}" height="${fmt(cardBottom - cardMargin)}" rx="${fmt(cardCorner)}" fill="none" stroke="${toSvgHex(frame.accentColor)}" stroke-width="${fmt(strokeW)}"/>"""
+                )
+            }
+            if (frame.style == OuterFrameStyle.CIRCULAR_STAMP) {
+                sb.appendLine(
+                    """  <circle cx="${fmt(qrOriginX + innerQrDim / 2f)}" cy="${fmt(qrOriginY + innerQrDim / 2f)}" r="${fmt(innerQrDim / 2f + totalW * 0.020f)}" fill="none" stroke="${toSvgHex(frame.accentColor)}" stroke-width="${fmt(max(totalW * 0.011f, 4f))}"/>"""
                 )
             }
             if (frame.style == OuterFrameStyle.CORNER_BRACKET) {
@@ -1068,8 +1287,30 @@ object QrEngine {
                 OuterFrameStyle.BOTTOM_SCAN_BANNER,
                 OuterFrameStyle.SPEECH_BUBBLE,
                 OuterFrameStyle.GLASS_CARD,
-                OuterFrameStyle.CORNER_BRACKET -> {
+                OuterFrameStyle.CORNER_BRACKET,
+                OuterFrameStyle.NEON_GLOW,
+                OuterFrameStyle.CIRCULAR_STAMP -> {
                     appendSvgPill(safeLabel, qrOriginY + innerQrDim + innerQrDim * 0.042f, 0.60f, 0.105f)
+                }
+                OuterFrameStyle.TICKET_STUB -> {
+                    val seamY = qrOriginY + innerQrDim + innerQrDim * 0.030f
+                    sb.appendLine(
+                        """  <line x1="${fmt(cardMargin + totalW * 0.05f)}" y1="${fmt(seamY)}" x2="${fmt(totalW - cardMargin - totalW * 0.05f)}" y2="${fmt(seamY)}" stroke="$accentHex" stroke-opacity="0.45" stroke-width="${fmt(max(totalW * 0.0045f, 2f))}" stroke-dasharray="${fmt(totalW * 0.025f)} ${fmt(totalW * 0.015f)}"/>"""
+                    )
+                    val py = seamY + innerQrDim * 0.024f
+                    appendSvgPill(safeLabel, py, 0.60f, 0.098f)
+                    if (hasSubtitle) {
+                        val safeSub = escapeXml(frame.subtitle.trim())
+                        sb.appendLine(
+                            """  <text x="${fmt(totalW / 2f)}" y="${fmt(py + totalW * 0.135f)}" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="${fmt(totalW * 0.030f)}" fill="$accentHex">$safeSub</text>"""
+                        )
+                    }
+                }
+                OuterFrameStyle.MINIMAL_OUTLINE -> {
+                    val y = qrOriginY + innerQrDim + innerQrDim * 0.088f
+                    sb.appendLine(
+                        """  <text x="${fmt(totalW / 2f)}" y="${fmt(y)}" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="${fmt(totalW * 0.036f)}" letter-spacing="2.4" fill="$accentHex">$safeLabel</text>"""
+                    )
                 }
                 OuterFrameStyle.WARM_POSTER -> {
                     val py = qrOriginY + innerQrDim + innerQrDim * 0.036f
@@ -1224,6 +1465,28 @@ object QrEngine {
                 sb.append("Q${fmt(x + s * 0.88f)},${fmt(y + s * 0.80f)} ${fmt(x + s * 0.50f)},${fmt(y + s * 0.94f)}")
                 sb.append("Q${fmt(x + s * 0.12f)},${fmt(y + s * 0.80f)} ${fmt(x + s * 0.12f)},${fmt(y + s * 0.52f)}Z ")
             }
+            QrPixelStyle.OCTAGON -> {
+                val r = scaled / 2f
+                for (i in 0 until 8) {
+                    val angle = (22.5 + i * 45.0) * PI / 180.0
+                    val px = cx + (r * cos(angle)).toFloat()
+                    val py = cy + (r * sin(angle)).toFloat()
+                    sb.append(if (i == 0) "M${fmt(px)},${fmt(py)}" else "L${fmt(px)},${fmt(py)}")
+                }
+                sb.append("Z ")
+            }
+            QrPixelStyle.RING -> {
+                val ro = scaled / 2f
+                val ri = ro * 0.44f
+                sb.append("M${fmt(cx - ro)},${fmt(cy)}a${fmt(ro)},${fmt(ro)} 0 1,0 ${fmt(ro * 2f)},0a${fmt(ro)},${fmt(ro)} 0 1,0 ${fmt(-ro * 2f)},0Z ")
+                sb.append("M${fmt(cx - ri)},${fmt(cy)}a${fmt(ri)},${fmt(ri)} 0 1,1 ${fmt(ri * 2f)},0a${fmt(ri)},${fmt(ri)} 0 1,1 ${fmt(-ri * 2f)},0Z ")
+            }
+            QrPixelStyle.WAVE_H -> {
+                appendSvgRoundRect(sb, ox, oy + (cell - scaled) / 2f, cell, scaled, scaled * 0.48f)
+            }
+            QrPixelStyle.WAVE_V -> {
+                appendSvgRoundRect(sb, ox + (cell - scaled) / 2f, oy, scaled, cell, scaled * 0.48f)
+            }
         }
     }
 
@@ -1243,7 +1506,7 @@ object QrEngine {
                 sb.append("M${fmt(ox)},${fmt(oy)}h${fmt(outerSize)}v${fmt(outerSize)}h${fmt(-outerSize)}Z ")
                 sb.append("M${fmt(ox + cell)},${fmt(oy + cell)}h${fmt(innerSize)}v${fmt(innerSize)}h${fmt(-innerSize)}Z ")
             }
-            QrEyeFrameStyle.CIRCLE -> {
+            QrEyeFrameStyle.CIRCLE, QrEyeFrameStyle.DOUBLE_RING -> {
                 val cx = ox + outerSize / 2f
                 val cy = oy + outerSize / 2f
                 val r1 = outerSize / 2f
@@ -1279,7 +1542,7 @@ object QrEngine {
                 appendSvgSelectiveRoundRect(sb, ox, oy, outerSize, outerSize, cr1, tl = true, tr = true, br = false, bl = true)
                 appendSvgSelectiveRoundRect(sb, ox + cell, oy + cell, innerSize, innerSize, cr2, tl = true, tr = true, br = false, bl = true)
             }
-            QrEyeFrameStyle.ROUNDED -> {
+            QrEyeFrameStyle.ROUNDED, QrEyeFrameStyle.BRACKET, QrEyeFrameStyle.HEXAGON -> {
                 appendSvgRoundRect(sb, ox, oy, outerSize, outerSize, outerSize * r)
                 appendSvgRoundRect(sb, ox + cell, oy + cell, innerSize, innerSize, innerSize * r * 0.85f)
             }
@@ -1303,6 +1566,8 @@ object QrEngine {
             QrEyeBallStyle.DIAMOND -> appendSvgPixelShape(sb, QrPixelStyle.DIAMOND, ox, oy, size, 1f, 0f)
             QrEyeBallStyle.STAR -> appendSvgPixelShape(sb, QrPixelStyle.STAR, ox, oy, size, 1.05f, 0f)
             QrEyeBallStyle.CROSS -> appendSvgPixelShape(sb, QrPixelStyle.CROSS, ox, oy, size, 0.96f, 0f)
+            QrEyeBallStyle.OCTAGON -> appendSvgPixelShape(sb, QrPixelStyle.OCTAGON, ox, oy, size, 1f, 0f)
+            QrEyeBallStyle.HEXAGON -> appendSvgPixelShape(sb, QrPixelStyle.HEXAGON, ox, oy, size, 1f, 0f)
             QrEyeBallStyle.LEAF -> appendSvgSelectiveRoundRect(
                 sb, ox, oy, size, size, size * r.coerceAtLeast(0.42f),
                 tl = true, tr = false, br = true, bl = false

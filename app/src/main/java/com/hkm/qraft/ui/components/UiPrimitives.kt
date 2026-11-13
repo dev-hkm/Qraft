@@ -10,11 +10,14 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,12 +30,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.hkm.qraft.ui.theme.QraftThemeTokens
 import com.hkm.qraft.ui.theme.appleBounceClick
 
@@ -208,6 +213,28 @@ fun QraftSectionHeader(
 }
 
 @Composable
+fun QraftStatusBarScrim(
+    modifier: Modifier = Modifier
+) {
+    val colors = QraftThemeTokens.colors
+    val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(statusTop + 18.dp)
+            .background(
+                Brush.verticalGradient(
+                    colorStops = arrayOf(
+                        0.0f to colors.background.copy(alpha = 0.96f),
+                        0.68f to colors.background.copy(alpha = 0.68f),
+                        1.0f to colors.background.copy(alpha = 0f)
+                    )
+                )
+            )
+    )
+}
+
+@Composable
 fun QraftResolutionSelector(
     selectedPx: Int,
     onSelect: (Int) -> Unit,
@@ -218,18 +245,19 @@ fun QraftResolutionSelector(
         512 to "512",
         1024 to "1K",
         2048 to "2K",
-        4096 to "4K UHD"
+        4096 to "4K",
+        8192 to "8K"
     )
     Row(
         modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         options.forEach { (px, label) ->
             val selected = selectedPx == px
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .defaultMinSize(minHeight = 44.dp)
+                    .defaultMinSize(minHeight = 46.dp)
                     .clip(RoundedCornerShape(14.dp))
                     .background(if (selected) colors.activePillBg else colors.surface)
                     .border(
@@ -238,20 +266,20 @@ fun QraftResolutionSelector(
                         RoundedCornerShape(14.dp)
                     )
                     .appleBounceClick { onSelect(px) }
-                    .padding(horizontal = 6.dp, vertical = 8.dp),
+                    .padding(horizontal = 4.dp, vertical = 7.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = label,
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.sp),
                         fontWeight = FontWeight.Bold,
                         color = if (selected) colors.activePillContent else colors.textPrimary,
                         maxLines = 1
                     )
                     Text(
-                        text = "${px}px",
-                        style = MaterialTheme.typography.labelSmall,
+                        text = "${px}",
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                         color = if (selected) colors.activePillContent.copy(alpha = 0.78f) else colors.textSecondary,
                         maxLines = 1
                     )

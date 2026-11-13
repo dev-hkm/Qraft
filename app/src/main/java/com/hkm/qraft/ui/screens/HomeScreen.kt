@@ -38,11 +38,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hkm.qraft.model.CodeKind
 import com.hkm.qraft.model.QrContentType
 import com.hkm.qraft.model.QrCreationItem
 import com.hkm.qraft.model.ThemeMode
 import com.hkm.qraft.qr.QrPayloadEncoder
 import com.hkm.qraft.ui.components.HeroQrArtworkIllustration
+import com.hkm.qraft.ui.components.QraftStatusBarScrim
 import com.hkm.qraft.ui.components.iconForContentType
 import com.hkm.qraft.ui.theme.AppleSprings
 import com.hkm.qraft.ui.theme.QraftThemeTokens
@@ -78,6 +80,8 @@ fun HomeScreen(
     onCycleTheme: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenStudioNew: (QrContentType) -> Unit,
+    onOpenStudioNewBarcode: () -> Unit = {},
+    onOpenScanner: () -> Unit = {},
     onOpenExisting: (QrCreationItem) -> Unit,
     onQuickFullscreen: (QrCreationItem) -> Unit,
     onToggleFavorite: (String) -> Unit,
@@ -109,23 +113,25 @@ fun HomeScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(colors.background)
-            .statusBarsPadding()
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
                 start = 20.dp,
                 end = 20.dp,
-                top = 14.dp,
+                top = 8.dp,
                 bottom = 112.dp
             ),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // 1. Header ("Morning, Creator" + date + theme/profile buttons)
+            // 1. Tonser Scrolling Header ("Morning, Creator" + date + Scan / Theme / Preferences)
             item {
                 StaggeredReveal(index = 0) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .statusBarsPadding()
+                            .padding(top = 6.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -139,23 +145,44 @@ fun HomeScreen(
                             )
                             Spacer(Modifier.height(2.dp))
                             Text(
-                                text = "$formattedDate • ${items.size} QR codes",
+                                text = "$formattedDate • ${items.size} codes",
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = colors.textSecondary
+                                color = colors.textSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
 
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            // Live Scanner quick button
+                            Surface(
+                                shape = CircleShape,
+                                color = colors.surface,
+                                border = BorderStroke(1.dp, colors.cardBorder),
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .appleBounceClick { onOpenScanner() }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.QrCodeScanner,
+                                        contentDescription = "Live Scanner",
+                                        tint = colors.espressoAccent,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+
                             // Light / Dark / System quick toggle pill
                             Surface(
                                 shape = CircleShape,
                                 color = colors.surface,
                                 border = BorderStroke(1.dp, colors.cardBorder),
                                 modifier = Modifier
-                                    .size(44.dp)
+                                    .size(38.dp)
                                     .appleBounceClick { onCycleTheme() }
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
@@ -172,19 +199,19 @@ fun HomeScreen(
                                             },
                                             contentDescription = "Switch theme",
                                             tint = colors.espressoAccent,
-                                            modifier = Modifier.size(20.dp)
+                                            modifier = Modifier.size(18.dp)
                                         )
                                     }
                                 }
                             }
 
-                            // Avatar / Studio Settings Circle (matching top-right circle in screenshot)
+                            // Studio Preferences Circle
                             Surface(
                                 shape = CircleShape,
                                 color = colors.heroBannerBg,
-                                border = BorderStroke(1.5.dp, colors.cardBorder),
+                                border = BorderStroke(1.2.dp, colors.cardBorder),
                                 modifier = Modifier
-                                    .size(48.dp)
+                                    .size(40.dp)
                                     .appleBounceClick { onOpenSettings() }
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
@@ -192,7 +219,7 @@ fun HomeScreen(
                                         imageVector = Icons.Rounded.QrCode2,
                                         contentDescription = "Studio Preferences",
                                         tint = colors.espressoAccent,
-                                        modifier = Modifier.size(24.dp)
+                                        modifier = Modifier.size(20.dp)
                                     )
                                 }
                             }
@@ -312,7 +339,7 @@ fun HomeScreen(
                             ) {
                                 Text(
                                     text = if (selectedCategory == null) {
-                                        "Craft custom QR"
+                                        "Craft QR & Barcodes"
                                     } else {
                                         "Create ${selectedCategory.title}"
                                     },
@@ -321,30 +348,53 @@ fun HomeScreen(
                                     color = colors.heroBannerTitle
                                 )
                                 Text(
-                                    text = "Custom shapes, gradients, logos, frames & vector SVG export",
+                                    text = "Custom shapes, logos, optional frames, 8K UHD & vector SVG",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = colors.heroBannerBody,
                                     lineHeight = 18.sp
                                 )
                                 Spacer(Modifier.height(4.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(50))
-                                        .background(colors.espressoAccent)
-                                        .appleBounceClick { onOpenStudioNew(targetType) }
-                                        .padding(horizontal = 20.dp, vertical = 10.dp)
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(
-                                        text = "Open Studio",
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = colors.espressoAccentContent
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(50))
+                                            .background(colors.espressoAccent)
+                                            .appleBounceClick { onOpenStudioNew(targetType) }
+                                            .padding(horizontal = 13.dp, vertical = 8.dp)
+                                    ) {
+                                        Text(
+                                            text = "Studio",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            color = colors.espressoAccentContent,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(50))
+                                            .background(colors.surface)
+                                            .border(1.dp, colors.cardBorder, RoundedCornerShape(50))
+                                            .appleBounceClick { onOpenStudioNewBarcode() }
+                                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                                    ) {
+                                        Text(
+                                            text = "Barcode",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            color = colors.textPrimary,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
+                                    }
                                 }
                             }
 
                             HeroQrArtworkIllustration(
                                 modifier = Modifier
-                                    .size(104.dp)
+                                    .size(92.dp)
                                     .graphicsLayer { translationY = floatY }
                             )
                         }
@@ -473,7 +523,7 @@ fun HomeScreen(
             }
         }
 
-        // 6. Deep Espresso Circular '+' FAB
+        // 6. Monochrome Circular '+' FAB
         Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
@@ -493,11 +543,14 @@ fun HomeScreen(
         ) {
             Icon(
                 imageVector = Icons.Rounded.Add,
-                contentDescription = "Create New QR Code",
+                contentDescription = "Create New Code",
                 tint = colors.espressoAccentContent,
                 modifier = Modifier.size(28.dp)
             )
         }
+
+        // Tonser top status bar feathered scrim
+        QraftStatusBarScrim(modifier = Modifier.align(Alignment.TopCenter))
     }
 }
 
@@ -512,8 +565,14 @@ fun QrTimelineRowCard(
 ) {
     val colors = QraftThemeTokens.colors
     val pastel = colors.pastelAt(item.type.pastelIndex)
-    val subtitle = remember(item.type, item.payload, item.design) {
-        "${item.design.pixelStyle.label} • ${QrPayloadEncoder.summarySubtitle(item.type, item.payload)}"
+    val isBarcode = item.resolvedCodeKind() == CodeKind.BARCODE
+    val barcodeSpec = if (isBarcode) item.resolvedBarcode() else null
+    val subtitle = remember(item.type, item.payload, item.design, item.codeKind, item.barcode) {
+        if (barcodeSpec != null) {
+            "${barcodeSpec.format.label} • ${barcodeSpec.data}"
+        } else {
+            "${item.design.pixelStyle.label} • ${QrPayloadEncoder.summarySubtitle(item.type, item.payload)}"
+        }
     }
 
     Row(
@@ -562,7 +621,7 @@ fun QrTimelineRowCard(
                     Icon(
                         imageVector = Icons.Rounded.Check,
                         contentDescription = "Favorite",
-                        tint = Color.White,
+                        tint = colors.espressoAccentContent,
                         modifier = Modifier.size(13.dp)
                     )
                 }
@@ -585,7 +644,7 @@ fun QrTimelineRowCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Pastel Icon Container
+                // Pastel / Monochrome Icon Container
                 Box(
                     modifier = Modifier
                         .size(46.dp)
@@ -594,8 +653,8 @@ fun QrTimelineRowCard(
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = iconForContentType(item.type),
-                        contentDescription = item.type.title,
+                        imageVector = if (isBarcode) Icons.Rounded.ViewWeek else iconForContentType(item.type),
+                        contentDescription = if (isBarcode) "Barcode" else item.type.title,
                         tint = pastel.content,
                         modifier = Modifier.size(22.dp)
                     )
@@ -623,7 +682,7 @@ fun QrTimelineRowCard(
                     )
                 }
 
-                // Right Metadata + Quick Scan Present (mirrors clock + '5 min' column!)
+                // Right Metadata + Quick Scan Present
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(3.dp),
@@ -633,13 +692,13 @@ fun QrTimelineRowCard(
                         .padding(horizontal = 6.dp, vertical = 4.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Rounded.QrCode2,
+                        imageVector = if (isBarcode) Icons.Rounded.ViewWeek else Icons.Rounded.QrCode2,
                         contentDescription = "Quick Present",
                         tint = colors.textPrimary,
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
-                        text = item.type.shortCode,
+                        text = barcodeSpec?.format?.shortCode ?: item.type.shortCode,
                         style = MaterialTheme.typography.labelSmall,
                         color = colors.textSecondary
                     )

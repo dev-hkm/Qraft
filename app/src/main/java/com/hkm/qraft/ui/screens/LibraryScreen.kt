@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hkm.qraft.model.CodeKind
 import com.hkm.qraft.model.QrContentType
 import com.hkm.qraft.model.QrCreationItem
 import com.hkm.qraft.qr.PrintSheetLayout
@@ -29,6 +30,7 @@ import com.hkm.qraft.qr.QrPayloadEncoder
 import com.hkm.qraft.ui.components.QraftButtonVariant
 import com.hkm.qraft.ui.components.QraftHeaderCircleButton
 import com.hkm.qraft.ui.components.QraftPillButton
+import com.hkm.qraft.ui.components.QraftStatusBarScrim
 import com.hkm.qraft.ui.components.QraftTextField
 import com.hkm.qraft.ui.components.SelectableChip
 import com.hkm.qraft.ui.components.iconForContentType
@@ -54,6 +56,7 @@ fun LibraryScreen(
     onOpenBatch: () -> Unit,
     onCreateNew: () -> Unit,
     onImportQr: () -> Unit = {},
+    onOpenScanner: () -> Unit = onImportQr,
     onBulkFavorite: (Set<String>, Boolean) -> Unit = { ids, fav -> ids.forEach { _ -> }; Unit },
     onBulkDelete: (Set<String>) -> Unit = { ids -> ids.forEach(onDelete) },
     onExportPrintSheet: (List<QrCreationItem>, PrintSheetLayout, Boolean) -> Unit = { _, _, _ -> }
@@ -61,6 +64,7 @@ fun LibraryScreen(
     val colors = QraftThemeTokens.colors
     var search by remember { mutableStateOf("") }
     var onlyFavorites by remember { mutableStateOf(false) }
+    var onlyBarcodes by remember { mutableStateOf(false) }
     var filterType by remember { mutableStateOf<QrContentType?>(null) }
     var sortBy by remember { mutableStateOf(LibrarySort.UPDATED) }
 
@@ -69,16 +73,20 @@ fun LibraryScreen(
     var showPrintDialog by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
-    val filtered = remember(items, search, onlyFavorites, filterType, sortBy) {
+    val filtered = remember(items, search, onlyFavorites, onlyBarcodes, filterType, sortBy) {
         val base = items.filter { item ->
+            val isBc = item.resolvedCodeKind() == CodeKind.BARCODE
             val matchFav = !onlyFavorites || item.isFavorite
-            val matchType = filterType == null || item.type == filterType
+            val matchKind = !onlyBarcodes || isBc
+            val matchType = filterType == null || (!isBc && item.type == filterType)
             val q = search.trim().lowercase()
+            val bc = if (isBc) item.resolvedBarcode() else null
             val matchSearch = q.isEmpty() ||
                 item.title.lowercase().contains(q) ||
                 item.type.title.lowercase().contains(q) ||
+                (bc != null && (bc.data.lowercase().contains(q) || bc.format.label.lowercase().contains(q))) ||
                 QrPayloadEncoder.encode(item.type, item.payload).lowercase().contains(q)
-            matchFav && matchType && matchSearch
+            matchFav && matchKind && matchType && matchSearch
         }
         when (sortBy) {
             LibrarySort.UPDATED -> base.sortedByDescending { it.updatedAtMillis }
@@ -98,212 +106,174 @@ fun LibraryScreen(
         }
     }
 
-    Scaffold(
-        containerColor = colors.background,
-        topBar = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        modifier = Modifier.weight(1f),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        QraftHeaderCircleButton(
-                            icon = Icons.Rounded.ArrowBackIosNew,
-                            contentDescription = "Back",
-                            size = 40.dp,
-                            onClick = onBack
-                        )
-                        Text(
-                            text = "QR Library",
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = colors.textPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        QraftHeaderCircleButton(
-                            icon = Icons.Rounded.QrCodeScanner,
-                            contentDescription = "Import & Remix QR",
-                            size = 40.dp,
-                            onClick = onImportQr
-                        )
-                        FilledTonalButton(
-                            onClick = onOpenBatch,
-                            shape = RoundedCornerShape(50),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                            colors = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = colors.surfaceMuted,
-                                contentColor = colors.textPrimary
-                            )
-                        ) {
-                            Icon(Icons.Rounded.AutoAwesomeMotion, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(5.dp))
-                            Text("Batch", maxLines = 1)
-                        }
-                        QraftHeaderCircleButton(
-                            icon = Icons.Rounded.Add,
-                            contentDescription = "Create new QR",
-                            size = 40.dp,
-                            containerColor = colors.espressoAccent,
-                            contentColor = colors.espressoAccentContent,
-                            borderColor = colors.espressoAccent,
-                            onClick = onCreateNew
-                        )
-                    }
-                }
-
-                QraftTextField(
-                    value = search,
-                    onValueChange = { search = it },
-                    label = "Search library",
-                    placeholder = "Search title, URL, Wi-Fi SSID…",
-                    leadingIcon = Icons.Rounded.Search,
-                    trailingIcon = if (search.isNotEmpty()) {
-                        {
-                            IconButton(onClick = { search = "" }) {
-                                Icon(Icons.Rounded.Close, contentDescription = "Clear")
-                            }
-                        }
-                    } else null
-                )
-
-                Row(
-                    modifier = Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    SelectableChip(
-                        label = if (selectionMode) "Done (${selectedIds.size})" else "Select",
-                        selected = selectionMode,
-                        onClick = {
-                            selectionMode = !selectionMode
-                            if (!selectionMode) selectedIds = emptySet()
-                        }
-                    )
-                    SelectableChip(
-                        label = "All (${items.size})",
-                        selected = !onlyFavorites && filterType == null,
-                        onClick = {
-                            onlyFavorites = false
-                            filterType = null
-                        }
-                    )
-                    SelectableChip(
-                        label = "Favorites",
-                        selected = onlyFavorites,
-                        onClick = { onlyFavorites = !onlyFavorites }
-                    )
-                    QrContentType.entries.forEach { t ->
-                        SelectableChip(
-                            label = t.shortCode,
-                            selected = filterType == t,
-                            onClick = { filterType = if (filterType == t) null else t }
-                        )
-                    }
-                }
-
-                Row(
-                    modifier = Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Sort:",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = colors.textSecondary
-                    )
-                    LibrarySort.entries.forEach { sortOption ->
-                        SelectableChip(
-                            label = sortOption.label,
-                            selected = sortBy == sortOption,
-                            onClick = { sortBy = sortOption }
-                        )
-                    }
-                }
-            }
-        },
-        bottomBar = {
-            if (selectionMode) {
-                Surface(
-                    color = colors.surface,
-                    shadowElevation = 10.dp,
-                    border = BorderStroke(1.dp, colors.cardBorder)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .navigationBarsPadding()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        TextButton(
-                            onClick = {
-                                val filteredIds = filtered.map { it.id }.toSet()
-                                selectedIds = if (selectedIds.containsAll(filteredIds) && filteredIds.isNotEmpty()) {
-                                    emptySet()
-                                } else {
-                                    filteredIds
-                                }
-                            }
-                        ) {
-                            Text(
-                                text = if (selectedIds.size == filtered.size && filtered.isNotEmpty()) "None" else "All",
-                                color = colors.espressoAccent
-                            )
-                        }
-                        Spacer(Modifier.weight(1f))
-                        IconButton(
-                            enabled = selectedIds.isNotEmpty(),
-                            onClick = {
-                                val anyUnpinned = items.any { it.id in selectedIds && !it.isFavorite }
-                                onBulkFavorite(selectedIds, anyUnpinned)
-                            }
-                        ) {
-                            Icon(Icons.Rounded.Star, contentDescription = "Pin / Unpin", tint = if (selectedIds.isNotEmpty()) colors.timelineDotActive else colors.textTertiary)
-                        }
-                        QraftPillButton(
-                            text = "Print",
-                            variant = QraftButtonVariant.TONAL,
-                            leadingIcon = Icons.Rounded.Print,
-                            enabled = selectedIds.isNotEmpty(),
-                            height = 40.dp,
-                            onClick = { showPrintDialog = true }
-                        )
-                        QraftPillButton(
-                            text = "Delete (${selectedIds.size})",
-                            variant = QraftButtonVariant.DANGER,
-                            enabled = selectedIds.isNotEmpty(),
-                            height = 40.dp,
-                            onClick = { showDeleteConfirm = true }
-                        )
-                    }
-                }
-            }
-        }
-    ) { padding ->
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colors.background)
+    ) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                .navigationBarsPadding(),
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                end = 16.dp,
+                top = 8.dp,
+                bottom = if (selectionMode) 96.dp else 28.dp
+            ),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // Tonser edge-to-edge scrolling header
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(top = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            QraftHeaderCircleButton(
+                                icon = Icons.Rounded.ArrowBackIosNew,
+                                contentDescription = "Back",
+                                size = 40.dp,
+                                onClick = onBack
+                            )
+                            Text(
+                                text = "Library",
+                                style = MaterialTheme.typography.headlineMedium,
+                                color = colors.textPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            QraftHeaderCircleButton(
+                                icon = Icons.Rounded.QrCodeScanner,
+                                contentDescription = "Live Scanner",
+                                size = 40.dp,
+                                onClick = onOpenScanner
+                            )
+                            FilledTonalButton(
+                                onClick = onOpenBatch,
+                                shape = RoundedCornerShape(50),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = colors.surfaceMuted,
+                                    contentColor = colors.textPrimary
+                                )
+                            ) {
+                                Icon(Icons.Rounded.AutoAwesomeMotion, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(5.dp))
+                                Text("Batch", maxLines = 1)
+                            }
+                            QraftHeaderCircleButton(
+                                icon = Icons.Rounded.Add,
+                                contentDescription = "Create new code",
+                                size = 40.dp,
+                                containerColor = colors.espressoAccent,
+                                contentColor = colors.espressoAccentContent,
+                                borderColor = colors.espressoAccent,
+                                onClick = onCreateNew
+                            )
+                        }
+                    }
+
+                    QraftTextField(
+                        value = search,
+                        onValueChange = { search = it },
+                        label = "Search library",
+                        placeholder = "Search title, URL, barcode, Wi-Fi…",
+                        leadingIcon = Icons.Rounded.Search,
+                        trailingIcon = if (search.isNotEmpty()) {
+                            {
+                                IconButton(onClick = { search = "" }) {
+                                    Icon(Icons.Rounded.Close, contentDescription = "Clear")
+                                }
+                            }
+                        } else null
+                    )
+
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        SelectableChip(
+                            label = if (selectionMode) "Done (${selectedIds.size})" else "Select",
+                            selected = selectionMode,
+                            onClick = {
+                                selectionMode = !selectionMode
+                                if (!selectionMode) selectedIds = emptySet()
+                            }
+                        )
+                        SelectableChip(
+                            label = "All (${items.size})",
+                            selected = !onlyFavorites && !onlyBarcodes && filterType == null,
+                            onClick = {
+                                onlyFavorites = false
+                                onlyBarcodes = false
+                                filterType = null
+                            }
+                        )
+                        SelectableChip(
+                            label = "Favorites",
+                            selected = onlyFavorites,
+                            onClick = { onlyFavorites = !onlyFavorites }
+                        )
+                        SelectableChip(
+                            label = "Barcodes",
+                            selected = onlyBarcodes,
+                            onClick = {
+                                onlyBarcodes = !onlyBarcodes
+                                if (onlyBarcodes) filterType = null
+                            }
+                        )
+                        QrContentType.entries.forEach { t ->
+                            SelectableChip(
+                                label = t.shortCode,
+                                selected = filterType == t,
+                                onClick = {
+                                    filterType = if (filterType == t) null else t
+                                    if (filterType != null) onlyBarcodes = false
+                                }
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Sort:",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = colors.textSecondary
+                        )
+                        LibrarySort.entries.forEach { sortOption ->
+                            SelectableChip(
+                                label = sortOption.label,
+                                selected = sortBy == sortOption,
+                                onClick = { sortBy = sortOption }
+                            )
+                        }
+                    }
+                }
+            }
+
             if (filtered.isEmpty()) {
                 item {
                     Surface(
@@ -318,8 +288,8 @@ fun LibraryScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Icon(Icons.Rounded.SearchOff, contentDescription = null, tint = colors.textTertiary, modifier = Modifier.size(36.dp))
-                            Text("No matching QR codes", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
-                            Text("Try clearing filters or create a new custom QR.", style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+                            Text("No matching codes", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
+                            Text("Try clearing filters or create a new custom QR or barcode.", style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
                         }
                     }
                 }
@@ -349,6 +319,67 @@ fun LibraryScreen(
                 }
             }
         }
+
+        if (selectionMode) {
+            Surface(
+                color = colors.surface,
+                shadowElevation = 10.dp,
+                border = BorderStroke(1.dp, colors.cardBorder),
+                modifier = Modifier.align(Alignment.BottomCenter)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    TextButton(
+                        onClick = {
+                            val filteredIds = filtered.map { it.id }.toSet()
+                            selectedIds = if (selectedIds.containsAll(filteredIds) && filteredIds.isNotEmpty()) {
+                                emptySet()
+                            } else {
+                                filteredIds
+                            }
+                        }
+                    ) {
+                        Text(
+                            text = if (selectedIds.size == filtered.size && filtered.isNotEmpty()) "None" else "All",
+                            color = colors.espressoAccent
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    IconButton(
+                        enabled = selectedIds.isNotEmpty(),
+                        onClick = {
+                            val anyUnpinned = items.any { it.id in selectedIds && !it.isFavorite }
+                            onBulkFavorite(selectedIds, anyUnpinned)
+                        }
+                    ) {
+                        Icon(Icons.Rounded.Star, contentDescription = "Pin / Unpin", tint = if (selectedIds.isNotEmpty()) colors.timelineDotActive else colors.textTertiary)
+                    }
+                    QraftPillButton(
+                        text = "Print",
+                        variant = QraftButtonVariant.TONAL,
+                        leadingIcon = Icons.Rounded.Print,
+                        enabled = selectedIds.isNotEmpty(),
+                        height = 40.dp,
+                        onClick = { showPrintDialog = true }
+                    )
+                    QraftPillButton(
+                        text = "Delete (${selectedIds.size})",
+                        variant = QraftButtonVariant.DANGER,
+                        enabled = selectedIds.isNotEmpty(),
+                        height = 40.dp,
+                        onClick = { showDeleteConfirm = true }
+                    )
+                }
+            }
+        }
+
+        QraftStatusBarScrim(modifier = Modifier.align(Alignment.TopCenter))
     }
 
     if (showDeleteConfirm) {
@@ -443,9 +474,11 @@ private fun LibraryItemCard(
     onDuplicate: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val colors = QraftThemeTokens.colors
-    val pastel = colors.pastelAt(item.type.pastelIndex)
-    var showMenu by remember { mutableStateOf(false) }
+            val colors = QraftThemeTokens.colors
+            val pastel = colors.pastelAt(item.type.pastelIndex)
+            val isBarcode = item.resolvedCodeKind() == CodeKind.BARCODE
+            val bc = if (isBarcode) item.resolvedBarcode() else null
+            var showMenu by remember { mutableStateOf(false) }
 
     Surface(
         shape = RoundedCornerShape(22.dp),
@@ -458,79 +491,103 @@ private fun LibraryItemCard(
                 onLongClick = onLongPress
             )
     ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            if (selectionMode) {
-                Icon(
-                    imageVector = if (selected) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
-                    contentDescription = null,
-                    tint = if (selected) colors.espressoAccent else colors.textTertiary,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(pastel.container),
-                contentAlignment = Alignment.Center
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(
-                    imageVector = iconForContentType(item.type),
-                    contentDescription = null,
-                    tint = pastel.content,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    text = item.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = colors.textPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = QrPayloadEncoder.summarySubtitle(item.type, item.payload),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontSize = 12.5.sp,
-                    color = colors.textSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = "${item.design.pixelStyle.label} • ${item.design.eyeFrameStyle.label} eyes • ${item.design.outerFrame.style.label}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.textTertiary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            IconButton(onClick = onToggleFavorite) {
-                Icon(
-                    imageVector = if (item.isFavorite) Icons.Rounded.Star else Icons.Rounded.StarOutline,
-                    contentDescription = "Favorite",
-                    tint = if (item.isFavorite) colors.timelineDotActive else colors.textTertiary
-                )
-            }
-
-            IconButton(onClick = onFullscreen) {
-                Icon(
-                    imageVector = Icons.Rounded.QrCode2,
-                    contentDescription = "Fullscreen scan",
-                    tint = colors.textPrimary
-                )
-            }
-
-            Box {
-                IconButton(onClick = { showMenu = true }) {
-                    Icon(Icons.Rounded.MoreVert, contentDescription = "More actions", tint = colors.textSecondary)
+                if (selectionMode) {
+                    Icon(
+                        imageVector = if (selected) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
+                        contentDescription = null,
+                        tint = if (selected) colors.espressoAccent else colors.textTertiary,
+                        modifier = Modifier.size(22.dp)
+                    )
                 }
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(pastel.container),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (isBarcode) Icons.Rounded.ViewWeek else iconForContentType(item.type),
+                        contentDescription = null,
+                        tint = pastel.content,
+                        modifier = Modifier.size(21.dp)
+                    )
+                }
+
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = item.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = colors.textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = if (bc != null) "${bc.format.label} • ${bc.data}" else QrPayloadEncoder.summarySubtitle(item.type, item.payload),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontSize = 12.5.sp,
+                        color = colors.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = if (bc != null) {
+                            "${bc.format.shortCode} • ${bc.exportWidthPx}px"
+                        } else {
+                            "${item.design.pixelStyle.label} • ${item.design.eyeFrameStyle.label} • ${item.design.outerFrame.style.label}"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.textTertiary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    IconButton(
+                        onClick = onToggleFavorite,
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (item.isFavorite) Icons.Rounded.Star else Icons.Rounded.StarOutline,
+                            contentDescription = "Favorite",
+                            tint = if (item.isFavorite) colors.timelineDotActive else colors.textTertiary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onFullscreen,
+                        modifier = Modifier.size(34.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isBarcode) Icons.Rounded.ViewWeek else Icons.Rounded.QrCode2,
+                            contentDescription = "Fullscreen scan",
+                            tint = colors.textPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Box {
+                        IconButton(
+                            onClick = { showMenu = true },
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(
+                                Icons.Rounded.MoreVert,
+                                contentDescription = "More actions",
+                                tint = colors.textSecondary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                 DropdownMenu(
                     expanded = showMenu,
                     onDismissRequest = { showMenu = false }
@@ -559,6 +616,7 @@ private fun LibraryItemCard(
                             onDelete()
                         }
                     )
+                }
                 }
             }
         }

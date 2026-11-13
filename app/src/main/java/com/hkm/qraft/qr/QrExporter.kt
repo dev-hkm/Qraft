@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import androidx.core.content.FileProvider
+import com.hkm.qraft.model.BarcodeDesignSpec
 import com.hkm.qraft.model.ExportImageFormat
 import com.hkm.qraft.model.QrDesignSpec
 import kotlinx.coroutines.Dispatchers
@@ -155,6 +156,179 @@ object QrExporter {
     fun copyPayloadToClipboard(context: Context, label: String, payload: String) {
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
         cm.setPrimaryClip(ClipData.newPlainText(label, payload))
+    }
+
+    suspend fun saveBarcodeToDevice(
+        context: Context,
+        title: String,
+        spec: BarcodeDesignSpec,
+        format: ExportImageFormat
+    ): ExportResult = withContext(Dispatchers.IO) {
+        runCatching {
+            val cleanName = sanitizeFilename(title)
+            val fileName = "${cleanName}_${System.currentTimeMillis()}.${format.extension}"
+
+            when (format) {
+                ExportImageFormat.PNG,
+                ExportImageFormat.JPEG,
+                ExportImageFormat.WEBP -> {
+                    val bitmap = BarcodeEngine.renderBarcodeBitmap(
+                        spec = spec,
+                        targetWidthPx = spec.exportWidthPx,
+                        forceOpaqueWhiteForJpeg = format == ExportImageFormat.JPEG
+                    )
+                    val uri = try {
+                        saveBitmapToGallery(context, bitmap, fileName, format)
+                    } finally {
+                        bitmap.recycle()
+                    }
+                    ExportResult(
+                        success = uri != null,
+                        message = if (uri != null) {
+                            "Saved ${spec.exportWidthPx}px ${format.extension.uppercase()} barcode to Pictures/Qraft"
+                        } else {
+                            "Could not save barcode"
+                        },
+                        uri = uri
+                    )
+                }
+                ExportImageFormat.SVG -> {
+                    val svg = BarcodeEngine.exportBarcodeSvg(spec)
+                    val uri = saveDocumentBytes(context, svg.toByteArray(Charsets.UTF_8), fileName, format.mimeType)
+                    ExportResult(
+                        success = uri != null,
+                        message = if (uri != null) "Saved barcode SVG to Documents/Qraft" else "Could not save SVG",
+                        uri = uri
+                    )
+                }
+                ExportImageFormat.PDF -> {
+                    val pdfBytes = renderBarcodePdfBytes(context, title, spec)
+                    val uri = saveDocumentBytes(context, pdfBytes, fileName, format.mimeType)
+                    ExportResult(
+                        success = uri != null,
+                        message = if (uri != null) "Saved barcode PDF to Documents/Qraft" else "Could not save PDF",
+                        uri = uri
+                    )
+                }
+            }
+        }.getOrElse { err ->
+            ExportResult(false, "Barcode export failed: ${err.localizedMessage ?: "unknown error"}")
+        }
+    }
+
+    suspend fun shareBarcode(
+        context: Context,
+        title: String,
+        spec: BarcodeDesignSpec,
+        format: ExportImageFormat
+    ): ExportResult = withContext(Dispatchers.IO) {
+        runCatching {
+            val dir = File(context.cacheDir, "exports").apply { mkdirs() }
+            val outFile = File(dir, "${sanitizeFilename(title)}.${format.extension}")
+            when (format) {
+                ExportImageFormat.PNG,
+                ExportImageFormat.JPEG,
+                ExportImageFormat.WEBP -> {
+                    val bitmap = BarcodeEngine.renderBarcodeBitmap(
+                        spec = spec,
+                        targetWidthPx = spec.exportWidthPx,
+                        forceOpaqueWhiteForJpeg = format == ExportImageFormat.JPEG
+                    )
+                    try {
+                        FileOutputStream(outFile).use { fos ->
+                            bitmap.compress(compressFormatFor(format), 96, fos)
+                        }
+                    } finally {
+                        bitmap.recycle()
+                    }
+                }
+                ExportImageFormat.SVG -> outFile.writeText(BarcodeEngine.exportBarcodeSvg(spec))
+                ExportImageFormat.PDF -> outFile.writeBytes(renderBarcodePdfBytes(context, title, spec))
+            }
+            val shareUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", outFile)
+            withContext(Dispatchers.Main) {
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = format.mimeType
+                    putExtra(Intent.EXTRA_STREAM, shareUri)
+                    putExtra(Intent.EXTRA_SUBJECT, title)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                val chooser = Intent.createChooser(shareIntent, "Share $title (${format.extension.uppercase()})")
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(chooser)
+            }
+            ExportResult(true, "Opened share sheet", shareUri)
+        }.getOrElse { err ->
+            ExportResult(false, "Share failed: ${err.localizedMessage ?: "unknown error"}")
+        }
+    }
+
+    suspend fun copyBarcodeToClipboard(
+        context: Context,
+        title: String,
+        spec: BarcodeDesignSpec
+    ): ExportResult = withContext(Dispatchers.IO) {
+        runCatching {
+            val dir = File(context.cacheDir, "exports").apply { mkdirs() }
+            val outFile = File(dir, "clipboard_${sanitizeFilename(title)}.png")
+            val clipWidth = spec.exportWidthPx.coerceIn(512, 2048)
+            val bitmap = BarcodeEngine.renderBarcodeBitmap(spec, targetWidthPx = clipWidth, forceOpaqueWhiteForJpeg = false)
+            try {
+                FileOutputStream(outFile).use { fos -> bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos) }
+            } finally {
+                bitmap.recycle()
+            }
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", outFile)
+            withContext(Dispatchers.Main) {
+                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                cm?.setPrimaryClip(ClipData.newUri(context.contentResolver, title.ifBlank { "Qraft Barcode" }, uri))
+            }
+            ExportResult(true, "Copied barcode image (${clipWidth}px) to clipboard", uri)
+        }.getOrElse { err ->
+            ExportResult(false, "Copy image failed: ${err.localizedMessage ?: "unknown error"}")
+        }
+    }
+
+    fun renderBarcodePdfBytes(
+        context: Context,
+        title: String,
+        spec: BarcodeDesignSpec
+    ): ByteArray = QrPdfWriter.writeSinglePage {
+        val pageW = QrPdfWriter.A4_WIDTH_PX
+        val pageH = QrPdfWriter.A4_HEIGHT_PX
+        val pageBitmap = Bitmap.createBitmap(pageW, pageH, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(pageBitmap)
+        canvas.drawColor(0xFFFAFAFA.toInt())
+
+        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFF111113.toInt()
+            textAlign = Paint.Align.CENTER
+            textSize = 92f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+        val subtitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFF686870.toInt()
+            textAlign = Paint.Align.CENTER
+            textSize = 42f
+        }
+        canvas.drawText(title.ifBlank { "Qraft Barcode" }, pageW / 2f, 340f, titlePaint)
+        canvas.drawText("${spec.format.label} • ${spec.data.take(64)}", pageW / 2f, 430f, subtitlePaint)
+
+        val codeBmp = BarcodeEngine.renderBarcodeBitmap(spec, targetWidthPx = 2048, forceOpaqueWhiteForJpeg = false)
+        val drawW = 2000f
+        val drawH = drawW * (codeBmp.height.toFloat() / codeBmp.width.toFloat())
+        val left = (pageW - drawW) / 2f
+        val top = (pageH - drawH) / 2f
+        canvas.drawBitmap(codeBmp, null, RectF(left, top, left + drawW, top + drawH), Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+        codeBmp.recycle()
+
+        val footerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xFF8C8C94.toInt()
+            textAlign = Paint.Align.CENTER
+            textSize = 36f
+        }
+        canvas.drawText("300 DPI Print Ready • Qraft Studio", pageW / 2f, pageH - 160f, footerPaint)
+        pageBitmap
     }
 
     suspend fun copyImageToClipboard(
@@ -304,16 +478,16 @@ object QrExporter {
         val pageH = QrPdfWriter.A4_HEIGHT_PX
         val pageBitmap = Bitmap.createBitmap(pageW, pageH, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(pageBitmap)
-        canvas.drawColor(0xFFFAF7F4.toInt())
+        canvas.drawColor(0xFFFAFAFA.toInt())
 
         val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = 0xFF1E1D1B.toInt()
+            color = 0xFF111113.toInt()
             textAlign = Paint.Align.CENTER
             textSize = 92f
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
         }
         val subtitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = 0xFF7B736C.toInt()
+            color = 0xFF686870.toInt()
             textAlign = Paint.Align.CENTER
             textSize = 42f
         }

@@ -34,12 +34,14 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hkm.qraft.model.*
+import com.hkm.qraft.qr.BarcodeEngine
 import com.hkm.qraft.qr.LogoCatalog
 import com.hkm.qraft.qr.QrEngine
 import com.hkm.qraft.ui.theme.AppleSprings
@@ -47,6 +49,7 @@ import com.hkm.qraft.ui.theme.QraftThemeTokens
 import io.github.alexzhirkevich.qrose.QrCodePainter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 @Composable
@@ -94,6 +97,7 @@ fun QrArtworkPreview(
 
     val frame = design.outerFrame
     val frameCorner = frame.cornerRadiusDp.dp
+    val framePad = (frame.effectivePaddingFraction() * 190f).dp
 
     val frameBorderModifier = when {
         frame.style == OuterFrameStyle.GRADIENT_BORDER -> Modifier.border(
@@ -101,6 +105,18 @@ fun QrArtworkPreview(
             brush = Brush.linearGradient(
                 listOf(Color(frame.accentColor), Color(frame.accentSecondaryColor))
             ),
+            shape = RoundedCornerShape(frameCorner)
+        )
+        frame.style == OuterFrameStyle.NEON_GLOW -> Modifier.border(
+            width = 2.5.dp,
+            brush = Brush.linearGradient(
+                listOf(Color(frame.accentColor), Color(frame.accentSecondaryColor))
+            ),
+            shape = RoundedCornerShape(frameCorner)
+        )
+        frame.style == OuterFrameStyle.MINIMAL_OUTLINE -> Modifier.border(
+            width = 1.2.dp,
+            color = Color(frame.accentColor),
             shape = RoundedCornerShape(frameCorner)
         )
         frame.style == OuterFrameStyle.GLASS_CARD -> Modifier.border(
@@ -145,20 +161,36 @@ fun QrArtworkPreview(
                     Color(frame.frameFillColor)
                 },
                 shadowElevation = if (QraftThemeTokens.colors.isDark) 4.dp else 10.dp,
-                modifier = Modifier
-                    .then(frameBorderModifier)
-                    .padding(0.dp)
+                modifier = Modifier.then(frameBorderModifier)
             ) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.padding(
-                        horizontal = 16.dp,
-                        vertical = if (
-                            frame.style == OuterFrameStyle.CLEAN_CARD ||
-                            frame.style == OuterFrameStyle.GRADIENT_BORDER
-                        ) 16.dp else 14.dp
+                        horizontal = if (frame.style == OuterFrameStyle.SCAN_BAR_HEADER) 0.dp else framePad,
+                        vertical = if (frame.style == OuterFrameStyle.SCAN_BAR_HEADER) 0.dp else framePad
                     )
                 ) {
+                    if (frame.style == OuterFrameStyle.SCAN_BAR_HEADER) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .width(qrViewportSize + framePad * 2)
+                                .background(Color(frame.accentColor))
+                                .padding(horizontal = 16.dp, vertical = 10.dp)
+                        ) {
+                            Text(
+                                text = label,
+                                color = Color(frame.textColor),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.4.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Spacer(Modifier.height(framePad))
+                    }
+
                     if (frame.style == OuterFrameStyle.TOP_BADGE_CARD || frame.style == OuterFrameStyle.DOUBLE_PILL) {
                         Box(
                             modifier = Modifier
@@ -179,15 +211,32 @@ fun QrArtworkPreview(
                         }
                     }
 
-                    Box(contentAlignment = Alignment.Center) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.padding(
+                            horizontal = if (frame.style == OuterFrameStyle.SCAN_BAR_HEADER) framePad else 0.dp
+                        )
+                    ) {
                         QrCoreBox(
                             qrPainter = qrPainter,
                             design = design,
                             bgPhotoBitmap = bgPhotoBitmap,
                             size = qrViewportSize,
-                            cornerRadius = (frameCorner - 8.dp).coerceAtLeast(10.dp),
+                            cornerRadius = if (frame.style == OuterFrameStyle.CIRCULAR_STAMP) {
+                                qrViewportSize / 2
+                            } else {
+                                (frameCorner - 8.dp).coerceAtLeast(10.dp)
+                            },
                             showCheckerboard = showCheckerboardForTransparent
                         )
+                        if (frame.style == OuterFrameStyle.CIRCULAR_STAMP) {
+                            Canvas(modifier = Modifier.size(qrViewportSize + 12.dp)) {
+                                drawCircle(
+                                    color = Color(frame.accentColor),
+                                    style = Stroke(width = 3.dp.toPx())
+                                )
+                            }
+                        }
                         if (frame.style == OuterFrameStyle.CORNER_BRACKET) {
                             Canvas(modifier = Modifier.size(qrViewportSize + 10.dp)) {
                                 val sw = 3.5.dp.toPx()
@@ -214,13 +263,78 @@ fun QrArtworkPreview(
                         }
                     }
 
+                    if (frame.style == OuterFrameStyle.SCAN_BAR_HEADER) {
+                        Spacer(Modifier.height(framePad))
+                    }
+
                     when (frame.style) {
+                        OuterFrameStyle.TICKET_STUB -> {
+                            Spacer(Modifier.height(10.dp))
+                            Canvas(
+                                modifier = Modifier
+                                    .width(qrViewportSize)
+                                    .height(2.dp)
+                            ) {
+                                drawLine(
+                                    color = Color(frame.accentColor).copy(alpha = 0.45f),
+                                    start = Offset(0f, size.height / 2f),
+                                    end = Offset(size.width, size.height / 2f),
+                                    strokeWidth = 1.5.dp.toPx(),
+                                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
+                                        floatArrayOf(14f, 10f),
+                                        0f
+                                    )
+                                )
+                            }
+                            Spacer(Modifier.height(10.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(Color(frame.accentColor))
+                                    .padding(horizontal = 20.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = label,
+                                    color = Color(frame.textColor),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.9.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            if (frame.subtitle.isNotBlank()) {
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = frame.subtitle.trim(),
+                                    color = Color(frame.accentColor),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        OuterFrameStyle.MINIMAL_OUTLINE -> {
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                text = label,
+                                color = Color(frame.accentColor),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 2.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                         OuterFrameStyle.BOTTOM_SCAN_BANNER,
                         OuterFrameStyle.SPEECH_BUBBLE,
                         OuterFrameStyle.WARM_POSTER,
                         OuterFrameStyle.DOUBLE_PILL,
                         OuterFrameStyle.GLASS_CARD,
-                        OuterFrameStyle.CORNER_BRACKET -> {
+                        OuterFrameStyle.CORNER_BRACKET,
+                        OuterFrameStyle.NEON_GLOW,
+                        OuterFrameStyle.CIRCULAR_STAMP -> {
                             Spacer(Modifier.height(12.dp))
                             Box(
                                 modifier = Modifier
@@ -229,7 +343,7 @@ fun QrArtworkPreview(
                                         Brush.horizontalGradient(
                                             listOf(
                                                 Color(frame.accentColor),
-                                                if (frame.style == OuterFrameStyle.WARM_POSTER) {
+                                                if (frame.style == OuterFrameStyle.WARM_POSTER || frame.style == OuterFrameStyle.NEON_GLOW) {
                                                     Color(frame.accentSecondaryColor)
                                                 } else {
                                                     Color(frame.accentColor)
@@ -297,6 +411,165 @@ fun QrArtworkPreview(
                     drawPath(path, color = Color(frame.frameFillColor))
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun BarcodeArtworkPreview(
+    spec: BarcodeDesignSpec,
+    modifier: Modifier = Modifier,
+    widthDp: Dp = 248.dp,
+    showCheckerboardForTransparent: Boolean = true
+) {
+    val encoded = remember(spec.format, spec.data) {
+        BarcodeEngine.encodeMatrix(spec)
+    }
+    val matrix = encoded.first
+    val validation = encoded.second
+    val isSquare2D = spec.format == BarcodeFormatType.AZTEC || spec.format == BarcodeFormatType.DATA_MATRIX
+    val barHeight = when {
+        isSquare2D -> widthDp * 0.72f
+        spec.format == BarcodeFormatType.PDF_417 -> widthDp * 0.44f
+        else -> widthDp * 0.36f
+    }
+
+    val coreCard: @Composable () -> Unit = {
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .then(
+                    if (spec.transparentBg) {
+                        Modifier
+                    } else {
+                        Modifier.background(Color(spec.backgroundColor))
+                    }
+                )
+                .padding(horizontal = (widthDp * spec.quietMarginFraction.coerceIn(0.03f, 0.14f)), vertical = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            if (spec.transparentBg && showCheckerboardForTransparent) {
+                CheckerboardBackground(modifier = Modifier.matchParentSize())
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (matrix != null) {
+                    Canvas(
+                        modifier = Modifier
+                            .width(if (isSquare2D) barHeight else widthDp - 36.dp)
+                            .height(barHeight)
+                    ) {
+                        val cols = matrix.width
+                        val rows = matrix.height
+                        val barColor = Color(spec.foregroundColor)
+                        if (!spec.format.is2D) {
+                            val barW = size.width / cols.toFloat()
+                            val midRow = rows / 2
+                            var x = 0
+                            while (x < cols) {
+                                if (matrix.get(x, midRow)) {
+                                    var end = x + 1
+                                    while (end < cols && matrix.get(end, midRow)) end++
+                                    val bx = x * barW
+                                    val bw = (end - x) * barW
+                                    if (spec.roundedBars) {
+                                        val r = min(bw * 0.48f, size.height * 0.08f)
+                                        drawRoundRect(
+                                            color = barColor,
+                                            topLeft = Offset(bx, 0f),
+                                            size = Size(bw, size.height),
+                                            cornerRadius = CornerRadius(r, r)
+                                        )
+                                    } else {
+                                        drawRect(
+                                            color = barColor,
+                                            topLeft = Offset(bx, 0f),
+                                            size = Size(bw + 0.4f, size.height)
+                                        )
+                                    }
+                                    x = end
+                                } else {
+                                    x++
+                                }
+                            }
+                        } else {
+                            val boxW = if (isSquare2D) min(size.width, size.height) else size.width
+                            val boxH = if (isSquare2D) boxW else size.height
+                            val ox = (size.width - boxW) / 2f
+                            val oy = (size.height - boxH) / 2f
+                            val cellW = boxW / cols.toFloat()
+                            val cellH = boxH / rows.toFloat()
+                            val r = if (spec.roundedBars) min(cellW, cellH) * 0.34f else 0f
+                            for (row in 0 until rows) {
+                                for (col in 0 until cols) {
+                                    if (matrix.get(col, row)) {
+                                        val mx = ox + col * cellW
+                                        val my = oy + row * cellH
+                                        if (r > 0.5f) {
+                                            drawRoundRect(
+                                                color = barColor,
+                                                topLeft = Offset(mx, my),
+                                                size = Size(cellW, cellH),
+                                                cornerRadius = CornerRadius(r, r)
+                                            )
+                                        } else {
+                                            drawRect(
+                                                color = barColor,
+                                                topLeft = Offset(mx, my),
+                                                size = Size(cellW + 0.4f, cellH + 0.4f)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (spec.showText) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = if (validation.isValid) validation.normalizedData else spec.data.ifBlank { spec.format.defaultSample },
+                        color = Color(spec.foregroundColor),
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        letterSpacing = 1.6.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    }
+
+    if (spec.framed) {
+        Surface(
+            modifier = modifier,
+            shape = RoundedCornerShape(spec.cornerRadiusDp.dp),
+            color = Color(spec.frameFillColor),
+            shadowElevation = if (QraftThemeTokens.colors.isDark) 4.dp else 10.dp
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(14.dp)
+            ) {
+                if (spec.caption.isNotBlank()) {
+                    Text(
+                        text = spec.caption.trim(),
+                        color = Color(spec.frameAccentColor),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.1.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                }
+                coreCard()
+            }
+        }
+    } else {
+        Box(modifier = modifier, contentAlignment = Alignment.Center) {
+            coreCard()
         }
     }
 }
@@ -406,55 +679,51 @@ fun CheckerboardBackground(
 }
 
 /**
- * Custom flat-vector hero illustration matching the warm peach/orange/olive-green aesthetic
- * of the attached reference screenshot.
+ * Editorial monochrome vector QR mark matching the white/black/graphite aesthetic.
  */
 @Composable
 fun HeroQrArtworkIllustration(
     modifier: Modifier = Modifier
 ) {
     val colors = QraftThemeTokens.colors
-    val cardFill = if (colors.isDark) Color(0xFF472C1B) else Color(0xFFFFFBF7)
-    val orangeMain = Color(0xFFF16D22)
-    val orangeDeep = if (colors.isDark) Color(0xFFFF9B5A) else Color(0xFF5C2E0B)
-    val sageAccent = Color(0xFF83AB32)
-    val softPeach = if (colors.isDark) Color(0xFF633B24) else Color(0xFFFAB589)
+    val cardFill = if (colors.isDark) Color(0xFF242429) else Color(0xFFFFFFFF)
+    val shadowTone = if (colors.isDark) Color(0xFF0E0E10) else Color(0xFFDCDCE2)
+    val primaryInk = if (colors.isDark) Color(0xFFFFFFFF) else Color(0xFF111113)
+    val secondaryInk = if (colors.isDark) Color(0xFFA1A1AA) else Color(0xFF52525B)
+    val subtleAccent = if (colors.isDark) Color(0xFF52525B) else Color(0xFFB4B4BE)
 
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
 
-        // Motion & sparkle rays around the card (mirroring the bell vibration arcs in the screenshot!)
         drawArc(
-            color = sageAccent,
+            color = subtleAccent,
             startAngle = -55f,
             sweepAngle = 50f,
             useCenter = false,
             topLeft = Offset(w * 0.66f, h * 0.08f),
             size = Size(w * 0.28f, h * 0.34f),
-            style = Stroke(width = w * 0.045f, cap = StrokeCap.Round)
+            style = Stroke(width = w * 0.04f, cap = StrokeCap.Round)
         )
         drawArc(
-            color = sageAccent,
+            color = subtleAccent,
             startAngle = 140f,
             sweepAngle = 55f,
             useCenter = false,
             topLeft = Offset(w * 0.02f, h * 0.50f),
             size = Size(w * 0.26f, h * 0.32f),
-            style = Stroke(width = w * 0.045f, cap = StrokeCap.Round)
+            style = Stroke(width = w * 0.04f, cap = StrokeCap.Round)
         )
 
-        // Small decorative confetti dots
-        drawCircle(color = orangeMain, radius = w * 0.038f, center = Offset(w * 0.16f, h * 0.18f))
-        drawCircle(color = softPeach, radius = w * 0.045f, center = Offset(w * 0.86f, h * 0.78f))
-        drawCircle(color = sageAccent, radius = w * 0.032f, center = Offset(w * 0.50f, h * 0.90f))
+        drawCircle(color = primaryInk, radius = w * 0.032f, center = Offset(w * 0.16f, h * 0.18f))
+        drawCircle(color = subtleAccent, radius = w * 0.038f, center = Offset(w * 0.86f, h * 0.78f))
+        drawCircle(color = secondaryInk, radius = w * 0.028f, center = Offset(w * 0.50f, h * 0.90f))
 
-        // Tilted card base
         val cardLeft = w * 0.18f
         val cardTop = h * 0.16f
         val cardSize = w * 0.64f
         drawRoundRect(
-            color = softPeach,
+            color = shadowTone,
             topLeft = Offset(cardLeft + w * 0.04f, cardTop + h * 0.05f),
             size = Size(cardSize, cardSize),
             cornerRadius = CornerRadius(w * 0.14f, w * 0.14f)
@@ -466,36 +735,33 @@ fun HeroQrArtworkIllustration(
             cornerRadius = CornerRadius(w * 0.14f, w * 0.14f)
         )
 
-        // Stylized finder eyes inside the card
         val eyeSize = cardSize * 0.28f
         val pad = cardSize * 0.14f
         val e1 = Offset(cardLeft + pad, cardTop + pad)
         val e2 = Offset(cardLeft + cardSize - pad - eyeSize, cardTop + pad)
         val e3 = Offset(cardLeft + pad, cardTop + cardSize - pad - eyeSize)
 
-        listOf(e1 to orangeMain, e2 to orangeDeep, e3 to orangeDeep).forEach { (pos, tint) ->
-            drawRoundRect(
+        listOf(e1 to primaryInk, e2 to primaryInk, e3 to secondaryInk).forEach { (pos, tint) ->
+            drawCircle(
                 color = tint,
-                topLeft = pos,
-                size = Size(eyeSize, eyeSize),
-                cornerRadius = CornerRadius(eyeSize * 0.28f, eyeSize * 0.28f),
-                style = Stroke(width = eyeSize * 0.20f)
+                radius = eyeSize * 0.44f,
+                center = Offset(pos.x + eyeSize / 2f, pos.y + eyeSize / 2f),
+                style = Stroke(width = eyeSize * 0.19f)
             )
             drawCircle(
                 color = tint,
-                radius = eyeSize * 0.18f,
+                radius = eyeSize * 0.17f,
                 center = Offset(pos.x + eyeSize / 2f, pos.y + eyeSize / 2f)
             )
         }
 
-        // Bottom-right colorful data dots
         val dotBaseX = e2.x + eyeSize * 0.22f
         val dotBaseY = e3.y + eyeSize * 0.22f
         val step = eyeSize * 0.56f
-        val r = eyeSize * 0.20f
-        drawCircle(color = orangeMain, radius = r, center = Offset(dotBaseX, dotBaseY))
-        drawCircle(color = sageAccent, radius = r, center = Offset(dotBaseX + step, dotBaseY))
-        drawCircle(color = orangeDeep, radius = r, center = Offset(dotBaseX, dotBaseY + step))
-        drawCircle(color = orangeMain, radius = r, center = Offset(dotBaseX + step, dotBaseY + step))
+        val r = eyeSize * 0.19f
+        drawCircle(color = primaryInk, radius = r, center = Offset(dotBaseX, dotBaseY))
+        drawCircle(color = subtleAccent, radius = r, center = Offset(dotBaseX + step, dotBaseY))
+        drawCircle(color = secondaryInk, radius = r, center = Offset(dotBaseX, dotBaseY + step))
+        drawCircle(color = primaryInk, radius = r * 1.15f, center = Offset(dotBaseX + step, dotBaseY + step))
     }
 }

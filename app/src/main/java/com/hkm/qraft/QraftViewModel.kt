@@ -8,6 +8,7 @@ import com.hkm.qraft.data.PresetCatalog
 import com.hkm.qraft.data.QraftRepository
 import com.hkm.qraft.data.UserPreferences
 import com.hkm.qraft.model.*
+import com.hkm.qraft.qr.BarcodeEngine
 import com.hkm.qraft.qr.LogoCatalog
 import com.hkm.qraft.qr.QrEngine
 import com.hkm.qraft.qr.QrExporter
@@ -28,13 +29,25 @@ data class StudioDraftState(
     val payload: QrPayloadFields = QrPayloadFields(),
     val design: QrDesignSpec = PresetCatalog.builtInPresets.first().design,
     val isFavorite: Boolean = false,
-    val isDirty: Boolean = false
+    val isDirty: Boolean = false,
+    val codeKind: CodeKind = CodeKind.QR,
+    val barcode: BarcodeDesignSpec = BarcodeDesignSpec()
 ) {
     val encodedPayload: String
-        get() = QrPayloadEncoder.encode(type, payload)
+        get() = if (codeKind == CodeKind.BARCODE) {
+            barcode.data.ifBlank { barcode.format.defaultSample }
+        } else {
+            QrPayloadEncoder.encode(type, payload)
+        }
 
     val effectiveTitle: String
-        get() = title.trim().ifBlank { QrPayloadEncoder.defaultTitle(type, payload) }
+        get() = title.trim().ifBlank {
+            if (codeKind == CodeKind.BARCODE) {
+                "${barcode.format.label} • ${barcode.data.take(16).ifBlank { "Barcode" }}"
+            } else {
+                QrPayloadEncoder.defaultTitle(type, payload)
+            }
+        }
 }
 
 class QraftViewModel(application: Application) : AndroidViewModel(application) {
@@ -76,25 +89,35 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             combine(_draft, preferences) { draftState, prefs ->
-                draftState.encodedPayload to (draftState.design to prefs.autoVerifyScannability)
-            }.collectLatest { (encoded, pair) ->
-                val (design, autoVerify) = pair
+                draftState to prefs.autoVerifyScannability
+            }.collectLatest { (draftState, autoVerify) ->
                 if (!autoVerify) {
+                    val fg = if (draftState.codeKind == CodeKind.BARCODE) {
+                        draftState.barcode.foregroundColor
+                    } else {
+                        draftState.design.darkBrush.primaryColor
+                    }
+                    val bg = if (draftState.codeKind == CodeKind.BARCODE) {
+                        draftState.barcode.backgroundColor
+                    } else {
+                        draftState.design.background.brush.primaryColor
+                    }
                     _scannability.value = ScannabilityReport(
                         isScannable = true,
-                        contrastRatio = QrEngine.contrastRatio(
-                            design.darkBrush.primaryColor,
-                            design.background.brush.primaryColor
-                        )
+                        contrastRatio = QrEngine.contrastRatio(fg, bg)
                     )
                     return@collectLatest
                 }
                 verifyJob?.cancel()
                 verifyJob = viewModelScope.launch {
-                    delay(220)
+                    delay(200)
                     _isVerifying.value = true
                     val report = withContext(Dispatchers.Default) {
-                        QrEngine.verifyScannability(getApplication(), encoded, design)
+                        if (draftState.codeKind == CodeKind.BARCODE) {
+                            BarcodeEngine.verifyBarcodeScannable(draftState.barcode)
+                        } else {
+                            QrEngine.verifyScannability(getApplication(), draftState.encodedPayload, draftState.design)
+                        }
                     }
                     _scannability.value = report
                     _isVerifying.value = false
@@ -223,9 +246,8 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
             QrContentType.WIFI -> QrPayloadFields(wifiSsid = "", wifiSecurity = WifiSecurity.WPA)
             else -> QrPayloadFields()
         }
-        val baseDesign = PresetCatalog.builtInPresets.first().design.copy(
-            exportSizePx = preferences.value.defaultExportResolution.coerceIn(512, 4096)
-        )
+        val res = preferences.value.defaultExportResolution.coerceIn(512, 8192)
+        val baseDesign = PresetCatalog.builtInPresets.first().design.copy(exportSizePx = res)
         clearHistory()
         _draft.value = StudioDraftState(
             editingId = null,
@@ -234,7 +256,29 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
             payload = defaultPayload,
             design = baseDesign,
             isFavorite = false,
-            isDirty = false
+            isDirty = false,
+            codeKind = CodeKind.QR,
+            barcode = BarcodeDesignSpec(exportWidthPx = res)
+        )
+    }
+
+    fun startNewBarcode(format: BarcodeFormatType = BarcodeFormatType.CODE_128) {
+        val res = preferences.value.defaultExportResolution.coerceIn(512, 8192)
+        clearHistory()
+        _draft.value = StudioDraftState(
+            editingId = null,
+            title = "",
+            type = QrContentType.TEXT,
+            payload = QrPayloadFields(text = format.defaultSample),
+            design = PresetCatalog.builtInPresets.first().design.copy(exportSizePx = res),
+            isFavorite = false,
+            isDirty = false,
+            codeKind = CodeKind.BARCODE,
+            barcode = BarcodeDesignSpec(
+                format = format,
+                data = format.defaultSample,
+                exportWidthPx = res
+            )
         )
     }
 
@@ -247,8 +291,93 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
             payload = item.payload,
             design = item.design,
             isFavorite = item.isFavorite,
-            isDirty = false
+            isDirty = false,
+            codeKind = item.resolvedCodeKind(),
+            barcode = item.resolvedBarcode()
         )
+    }
+
+    fun setDraftCodeKind(kind: CodeKind) {
+        updateDraftWithHistory("code_kind", 0L) { current ->
+            if (current.codeKind == kind) current
+            else current.copy(codeKind = kind, isDirty = true)
+        }
+    }
+
+    fun updateDraftBarcode(spec: BarcodeDesignSpec) {
+        updateDraftWithHistory("barcode_edit", 500L) { current ->
+            current.copy(
+                barcode = spec,
+                design = current.design.copy(exportSizePx = spec.exportWidthPx),
+                isDirty = true
+            )
+        }
+    }
+
+    fun openScannedInStudio(rawText: String, detectedBarcodeFormat: BarcodeFormatType? = null) {
+        val clean = rawText.trim()
+        if (clean.isEmpty()) return
+        val res = preferences.value.defaultExportResolution.coerceIn(512, 8192)
+        if (detectedBarcodeFormat != null) {
+            clearHistory()
+            _draft.value = StudioDraftState(
+                editingId = null,
+                title = "Scanned ${detectedBarcodeFormat.label}",
+                type = QrContentType.TEXT,
+                payload = QrPayloadFields(text = clean),
+                design = PresetCatalog.builtInPresets.first().design.copy(exportSizePx = res),
+                isDirty = true,
+                codeKind = CodeKind.BARCODE,
+                barcode = BarcodeDesignSpec(
+                    format = detectedBarcodeFormat,
+                    data = clean,
+                    exportWidthPx = res
+                )
+            )
+            _statusBanner.tryEmit("Loaded scanned ${detectedBarcodeFormat.label} into Studio")
+        } else {
+            importSharedPayload(clean)
+        }
+    }
+
+    fun saveScannedToLibrary(rawText: String, detectedBarcodeFormat: BarcodeFormatType? = null) {
+        val clean = rawText.trim()
+        if (clean.isEmpty()) return
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            val res = preferences.value.defaultExportResolution.coerceIn(512, 8192)
+            val item = if (detectedBarcodeFormat != null) {
+                QrCreationItem(
+                    title = "Scanned ${detectedBarcodeFormat.label}",
+                    type = QrContentType.TEXT,
+                    payload = QrPayloadFields(text = clean),
+                    design = PresetCatalog.builtInPresets.first().design.copy(exportSizePx = res),
+                    isVerifiedScannable = true,
+                    createdAtMillis = now,
+                    updatedAtMillis = now,
+                    codeKind = CodeKind.BARCODE,
+                    barcode = BarcodeDesignSpec(
+                        format = detectedBarcodeFormat,
+                        data = clean,
+                        exportWidthPx = res
+                    )
+                )
+            } else {
+                val parsed = com.hkm.qraft.qr.QrCodeImporter.parsePayloadToImport(clean)
+                QrCreationItem(
+                    title = parsed.suggestedTitle,
+                    type = parsed.type,
+                    payload = parsed.fields,
+                    design = PresetCatalog.builtInPresets.first().design.copy(exportSizePx = res),
+                    isVerifiedScannable = true,
+                    createdAtMillis = now,
+                    updatedAtMillis = now,
+                    codeKind = CodeKind.QR
+                )
+            }
+            repository.saveItem(item)
+            _statusBanner.tryEmit("Saved scanned code \"${item.title}\"")
+        }
     }
 
     fun importQrFromUri(uri: Uri, onLoaded: () -> Unit) {
@@ -261,7 +390,7 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
             val baseDesign = PresetCatalog.builtInPresets.first().design.copy(
-                exportSizePx = preferences.value.defaultExportResolution.coerceIn(512, 4096)
+                exportSizePx = preferences.value.defaultExportResolution.coerceIn(512, 8192)
             )
             clearHistory()
             _draft.value = StudioDraftState(
@@ -271,7 +400,8 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
                 payload = decoded.fields,
                 design = baseDesign,
                 isFavorite = false,
-                isDirty = true
+                isDirty = true,
+                codeKind = CodeKind.QR
             )
             _statusBanner.tryEmit("Imported ${decoded.type.title} QR • Ready to remix")
             onLoaded()
@@ -283,7 +413,7 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
         if (clean.isEmpty()) return
         val decoded = com.hkm.qraft.qr.QrCodeImporter.parsePayloadToImport(clean)
         val baseDesign = PresetCatalog.builtInPresets.first().design.copy(
-            exportSizePx = preferences.value.defaultExportResolution.coerceIn(512, 4096)
+            exportSizePx = preferences.value.defaultExportResolution.coerceIn(512, 8192)
         )
         clearHistory()
         _draft.value = StudioDraftState(
@@ -293,7 +423,8 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
             payload = decoded.fields,
             design = baseDesign,
             isFavorite = false,
-            isDirty = true
+            isDirty = true,
+            codeKind = CodeKind.QR
         )
         _statusBanner.tryEmit("Loaded ${decoded.type.title} content into Studio")
         onLoaded()
@@ -446,6 +577,16 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
 
     fun autoFixScannability() {
         updateDraftWithHistory("autofix", 0L) { state ->
+            if (state.codeKind == CodeKind.BARCODE) {
+                val fixed = state.barcode.copy(
+                    foregroundColor = 0xFF111113,
+                    backgroundColor = 0xFFFFFFFF,
+                    transparentBg = false,
+                    roundedBars = false,
+                    quietMarginFraction = state.barcode.quietMarginFraction.coerceAtLeast(0.08f)
+                )
+                return@updateDraftWithHistory state.copy(barcode = fixed, isDirty = true)
+            }
             val current = state.design
             val fixedLogo = if (current.logo.sourceType != LogoSourceType.NONE && current.logo.sizeFraction > 0.23f) {
                 current.logo.copy(sizeFraction = 0.21f, paddingStyle = LogoPaddingStyle.NATURAL, backingEnabled = true)
@@ -454,7 +595,7 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
             }
             state.copy(
                 design = current.copy(
-                    darkBrush = current.darkBrush.copy(primaryColor = 0xFF1E1D1B),
+                    darkBrush = current.darkBrush.copy(primaryColor = 0xFF111113),
                     background = current.background.copy(
                         mode = BackgroundMode.SOLID,
                         brush = BrushStyleConfig(mode = BrushMode.SOLID, primaryColor = 0xFFFFFFFF)
@@ -466,11 +607,80 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
                 isDirty = true
             )
         }
-        _statusBanner.tryEmit("Boosted contrast and error correction")
+        _statusBanner.tryEmit("Boosted contrast & scan reliability")
+    }
+
+    fun swapDarkGradientColors() {
+        updateDraftWithHistory("swap_grad", 0L) { state ->
+            val b = state.design.darkBrush
+            state.copy(
+                design = state.design.copy(
+                    darkBrush = b.copy(primaryColor = b.secondaryColor, secondaryColor = b.primaryColor)
+                ),
+                isDirty = true
+            )
+        }
+    }
+
+    fun invertInkAndBackground() {
+        updateDraftWithHistory("invert_ink_bg", 0L) { state ->
+            if (state.codeKind == CodeKind.BARCODE) {
+                val bc = state.barcode
+                return@updateDraftWithHistory state.copy(
+                    barcode = bc.copy(
+                        foregroundColor = bc.backgroundColor,
+                        backgroundColor = bc.foregroundColor,
+                        transparentBg = false
+                    ),
+                    isDirty = true
+                )
+            }
+            val d = state.design
+            val fg = d.darkBrush.primaryColor
+            val bg = d.background.brush.primaryColor
+            state.copy(
+                design = d.copy(
+                    darkBrush = d.darkBrush.copy(primaryColor = bg, mode = BrushMode.SOLID),
+                    background = d.background.copy(
+                        mode = BackgroundMode.SOLID,
+                        brush = d.background.brush.copy(primaryColor = fg, mode = BrushMode.SOLID)
+                    )
+                ),
+                isDirty = true
+            )
+        }
     }
 
     fun saveDraftToLibrary(onSaved: ((QrCreationItem) -> Unit)? = null) {
         val current = _draft.value
+        if (current.codeKind == CodeKind.BARCODE) {
+            val check = BarcodeEngine.normalizeAndValidate(current.barcode.format, current.barcode.data)
+            if (!check.isValid) {
+                _statusBanner.tryEmit(check.warningOrError ?: "Invalid barcode input")
+                return
+            }
+            viewModelScope.launch {
+                val now = System.currentTimeMillis()
+                val item = QrCreationItem(
+                    id = current.editingId ?: UUID.randomUUID().toString(),
+                    title = current.effectiveTitle,
+                    type = QrContentType.TEXT,
+                    payload = QrPayloadFields(text = check.normalizedData),
+                    design = current.design,
+                    isFavorite = current.isFavorite,
+                    isVerifiedScannable = _scannability.value.isScannable,
+                    createdAtMillis = now,
+                    updatedAtMillis = now,
+                    codeKind = CodeKind.BARCODE,
+                    barcode = current.barcode.copy(data = check.normalizedData)
+                )
+                repository.saveItem(item)
+                _draft.update { it.copy(editingId = item.id, title = item.title, isDirty = false) }
+                _statusBanner.tryEmit("Saved \"${item.title}\"")
+                onSaved?.invoke(item)
+            }
+            return
+        }
         val validationError = QrPayloadEncoder.validate(current.type, current.payload)
         if (validationError != null) {
             _statusBanner.tryEmit(validationError)
@@ -487,7 +697,8 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
                 isFavorite = current.isFavorite,
                 isVerifiedScannable = _scannability.value.isScannable,
                 createdAtMillis = now,
-                updatedAtMillis = now
+                updatedAtMillis = now,
+                codeKind = CodeKind.QR
             )
             repository.saveItem(item)
             _draft.update { it.copy(editingId = item.id, title = item.title, isDirty = false) }
@@ -534,13 +745,22 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
         val current = _draft.value
         viewModelScope.launch {
             _isExporting.value = true
-            val result = QrExporter.saveToDevice(
-                context = getApplication(),
-                title = current.effectiveTitle,
-                data = current.encodedPayload,
-                design = current.design,
-                format = format
-            )
+            val result = if (current.codeKind == CodeKind.BARCODE) {
+                QrExporter.saveBarcodeToDevice(
+                    context = getApplication(),
+                    title = current.effectiveTitle,
+                    spec = current.barcode,
+                    format = format
+                )
+            } else {
+                QrExporter.saveToDevice(
+                    context = getApplication(),
+                    title = current.effectiveTitle,
+                    data = current.encodedPayload,
+                    design = current.design,
+                    format = format
+                )
+            }
             _isExporting.value = false
             _statusBanner.tryEmit(result.message)
         }
@@ -550,13 +770,22 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
         val current = _draft.value
         viewModelScope.launch {
             _isExporting.value = true
-            val result = QrExporter.shareQr(
-                context = getApplication(),
-                title = current.effectiveTitle,
-                data = current.encodedPayload,
-                design = current.design,
-                format = format
-            )
+            val result = if (current.codeKind == CodeKind.BARCODE) {
+                QrExporter.shareBarcode(
+                    context = getApplication(),
+                    title = current.effectiveTitle,
+                    spec = current.barcode,
+                    format = format
+                )
+            } else {
+                QrExporter.shareQr(
+                    context = getApplication(),
+                    title = current.effectiveTitle,
+                    data = current.encodedPayload,
+                    design = current.design,
+                    format = format
+                )
+            }
             _isExporting.value = false
             if (!result.success) _statusBanner.tryEmit(result.message)
         }
@@ -564,24 +793,42 @@ class QraftViewModel(application: Application) : AndroidViewModel(application) {
 
     fun copyPayload() {
         val current = _draft.value
+        val payload = if (current.codeKind == CodeKind.BARCODE) current.barcode.data else current.encodedPayload
         QrExporter.copyPayloadToClipboard(
             context = getApplication(),
             label = current.effectiveTitle,
-            payload = current.encodedPayload
+            payload = payload
         )
         _statusBanner.tryEmit("Copied payload to clipboard")
+    }
+
+    fun copyRawText(text: String) {
+        QrExporter.copyPayloadToClipboard(
+            context = getApplication(),
+            label = "Scanned Code",
+            payload = text
+        )
+        _statusBanner.tryEmit("Copied to clipboard")
     }
 
     fun copyExportImage() {
         val current = _draft.value
         viewModelScope.launch {
             _isExporting.value = true
-            val result = QrExporter.copyImageToClipboard(
-                context = getApplication(),
-                title = current.effectiveTitle,
-                data = current.encodedPayload,
-                design = current.design
-            )
+            val result = if (current.codeKind == CodeKind.BARCODE) {
+                QrExporter.copyBarcodeToClipboard(
+                    context = getApplication(),
+                    title = current.effectiveTitle,
+                    spec = current.barcode
+                )
+            } else {
+                QrExporter.copyImageToClipboard(
+                    context = getApplication(),
+                    title = current.effectiveTitle,
+                    data = current.encodedPayload,
+                    design = current.design
+                )
+            }
             _isExporting.value = false
             _statusBanner.tryEmit(result.message)
         }

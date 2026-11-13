@@ -54,13 +54,19 @@ object LogoCatalog {
         LogoIconChoice("code", "Code", Icons.Rounded.Code),
         LogoIconChoice("gift", "Gift", Icons.Rounded.CardGiftcard),
         LogoIconChoice("rocket", "Launch", Icons.Rounded.RocketLaunch),
-        LogoIconChoice("home", "Home", Icons.Rounded.Home)
+        LogoIconChoice("home", "Home", Icons.Rounded.Home),
+        LogoIconChoice("diamond", "Diamond", Icons.Rounded.Diamond),
+        LogoIconChoice("bolt", "Bolt", Icons.Rounded.Bolt),
+        LogoIconChoice("fingerprint", "ID Pass", Icons.Rounded.Fingerprint),
+        LogoIconChoice("palette", "Studio", Icons.Rounded.Palette),
+        LogoIconChoice("terminal", "Dev", Icons.Rounded.Terminal),
+        LogoIconChoice("shield", "Shield", Icons.Rounded.Shield)
     )
 
     val popularEmojis: List<String> = listOf(
-        "⚡", "☕", "✨", "🔥", "💎", "🎵",
-        "📍", "🎁", "🚀", "🌿", "🧡", "🛍️",
-        "📱", "💳", "🎉", "🔒", "📸", "⭐"
+        "✦", "⚡", "☕", "✨", "🔥", "💎",
+        "🎵", "📍", "🎁", "🚀", "🌿", "🖤",
+        "🛍️", "📱", "💳", "🎉", "🔒", "📸"
     )
 
     fun iconForKey(key: String): ImageVector =
@@ -98,6 +104,11 @@ object LogoCatalog {
                 color = config.monogramBgColor.toInt()
             }
             canvas.drawRect(0f, 0f, size, size, bgPaint)
+        }
+
+        val rot = config.effectiveRotationDeg()
+        if (rot != 0f) {
+            canvas.rotate(rot, size / 2f, size / 2f)
         }
 
         when (config.sourceType) {
@@ -143,7 +154,7 @@ object LogoCatalog {
         canvas.restore()
 
         if (config.borderEnabled) {
-            val strokeW = (size * 0.045f).coerceAtLeast(3f)
+            val strokeW = (size * config.effectiveBorderWidthFraction()).coerceAtLeast(3f)
             val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 style = Paint.Style.STROKE
                 strokeWidth = strokeW

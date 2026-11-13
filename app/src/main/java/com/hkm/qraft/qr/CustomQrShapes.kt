@@ -77,6 +77,16 @@ object CustomQrShapes {
                 addPolygon(this, size, factor, sides = 6, rotationOffsetDeg = -30f)
             }
             QrPixelStyle.SHIELD -> pixelModifier { size, _ -> addShield(this, size, factor) }
+            QrPixelStyle.OCTAGON -> pixelModifier { size, _ ->
+                addPolygon(this, size, factor, sides = 8, rotationOffsetDeg = 22.5f)
+            }
+            QrPixelStyle.RING -> pixelModifier { size, _ -> addHollowRing(this, size, factor) }
+            QrPixelStyle.WAVE_H -> pixelModifier { size, neighbors ->
+                addConnectedPill(this, size, factor, horizontal = true, neighbors = neighbors)
+            }
+            QrPixelStyle.WAVE_V -> pixelModifier { size, neighbors ->
+                addConnectedPill(this, size, factor, horizontal = false, neighbors = neighbors)
+            }
         }
     }
 
@@ -137,6 +147,54 @@ object CustomQrShapes {
                     Path.Direction.CounterClockwise
                 )
             }
+            QrEyeFrameStyle.DOUBLE_RING -> frameModifier { size, _ ->
+                // Exact ISO 1:1:3:1:1 outer circular ring + 4 non-overlapping diagonal orbital studs
+                val ringT = size / 6.8f
+                addOval(Rect(0f, 0f, size, size), Path.Direction.Clockwise)
+                addOval(Rect(ringT, ringT, size - ringT, size - ringT), Path.Direction.CounterClockwise)
+                val dotR = size * 0.052f
+                val corner = size * 0.085f
+                listOf(
+                    corner to corner,
+                    (size - corner) to corner,
+                    corner to (size - corner),
+                    (size - corner) to (size - corner)
+                ).forEach { (dx, dy) ->
+                    addOval(Rect(dx - dotR, dy - dotR, dx + dotR, dy + dotR), Path.Direction.Clockwise)
+                }
+            }
+            QrEyeFrameStyle.BRACKET -> frameModifier { size, _ ->
+                // Architectural caliper frame: exact 1:1:3:1:1 thickness at 0.50f centerlines with dual symmetrical caliper notches
+                val t = size / 7f
+                val notch = t * 0.26f
+                val a1 = size * 0.26f
+                val a2 = size * 0.40f
+                val b1 = size * 0.60f
+                val b2 = size * 0.74f
+                moveTo(0f, 0f)
+                lineTo(a1, 0f); lineTo(a1, notch); lineTo(a2, notch); lineTo(a2, 0f)
+                lineTo(b1, 0f); lineTo(b1, notch); lineTo(b2, notch); lineTo(b2, 0f)
+                lineTo(size, 0f)
+                lineTo(size, a1); lineTo(size - notch, a1); lineTo(size - notch, a2); lineTo(size, a2)
+                lineTo(size, b1); lineTo(size - notch, b1); lineTo(size - notch, b2); lineTo(size, b2)
+                lineTo(size, size)
+                lineTo(b2, size); lineTo(b2, size - notch); lineTo(b1, size - notch); lineTo(b1, size)
+                lineTo(a2, size); lineTo(a2, size - notch); lineTo(a1, size - notch); lineTo(a1, size)
+                lineTo(0f, size)
+                lineTo(0f, b2); lineTo(notch, b2); lineTo(notch, b1); lineTo(0f, b1)
+                lineTo(0f, a2); lineTo(notch, a2); lineTo(notch, a1); lineTo(0f, a1)
+                close()
+                val ir = t * 0.30f
+                addRoundRect(
+                    RoundRect(Rect(t, t, size - t, size - t), CornerRadius(ir, ir)),
+                    Path.Direction.CounterClockwise
+                )
+            }
+            QrEyeFrameStyle.HEXAGON -> frameModifier { size, _ ->
+                val ringThickness = size / 6.8f
+                addPolygon(this, size, 1.02f, sides = 6, rotationOffsetDeg = -30f)
+                addPolygonCcw(this, size, (size - 2f * ringThickness) / size * 1.02f, sides = 6, rotationOffsetDeg = -30f)
+            }
         }
     }
 
@@ -157,6 +215,12 @@ object CustomQrShapes {
             QrEyeBallStyle.STAR -> ballModifier { size, _ -> addSparkleStar(this, size, 1.05f) }
             QrEyeBallStyle.SQUIRCLE -> QrBallShape.roundCorners(0.36f)
             QrEyeBallStyle.CROSS -> ballModifier { size, _ -> addRoundedPlus(this, size, 0.96f) }
+            QrEyeBallStyle.OCTAGON -> ballModifier { size, _ ->
+                addPolygon(this, size, 1.0f, sides = 8, rotationOffsetDeg = 22.5f)
+            }
+            QrEyeBallStyle.HEXAGON -> ballModifier { size, _ ->
+                addPolygon(this, size, 1.0f, sides = 6, rotationOffsetDeg = -30f)
+            }
         }
     }
 
@@ -240,23 +304,32 @@ object CustomQrShapes {
     }
 
     private fun addRoundedPlus(path: Path, size: Float, factor: Float) {
-        val scaled = size * factor
+        // Non-overlapping single closed Swiss cross polygon (EvenOdd-safe, bold center for ZXing!)
+        val scaled = size * factor.coerceAtLeast(0.90f)
         val pad = (size - scaled) / 2f
-        val arm = scaled * 0.36f
-        val armOffset = (scaled - arm) / 2f
-        val r = arm * 0.35f
-        path.addRoundRect(
-            RoundRect(
-                Rect(pad + armOffset, pad, pad + armOffset + arm, pad + scaled),
-                CornerRadius(r, r)
-            )
-        )
-        path.addRoundRect(
-            RoundRect(
-                Rect(pad, pad + armOffset, pad + scaled, pad + armOffset + arm),
-                CornerRadius(r, r)
-            )
-        )
+        val arm = scaled * 0.62f
+        val inset = (scaled - arm) / 2f
+        val x0 = pad
+        val x1 = pad + inset
+        val x2 = pad + inset + arm
+        val x3 = pad + scaled
+        val y0 = pad
+        val y1 = pad + inset
+        val y2 = pad + inset + arm
+        val y3 = pad + scaled
+        path.moveTo(x1, y0)
+        path.lineTo(x2, y0)
+        path.lineTo(x2, y1)
+        path.lineTo(x3, y1)
+        path.lineTo(x3, y2)
+        path.lineTo(x2, y2)
+        path.lineTo(x2, y3)
+        path.lineTo(x1, y3)
+        path.lineTo(x1, y2)
+        path.lineTo(x0, y2)
+        path.lineTo(x0, y1)
+        path.lineTo(x1, y1)
+        path.close()
     }
 
     private fun addHeart(path: Path, size: Float, factor: Float) {
@@ -317,6 +390,61 @@ object CustomQrShapes {
         path.lineTo(ox + s * 0.88f, oy + s * 0.52f)
         path.quadraticTo(ox + s * 0.88f, oy + s * 0.80f, ox + s * 0.50f, oy + s * 0.94f)
         path.quadraticTo(ox + s * 0.12f, oy + s * 0.80f, ox + s * 0.12f, oy + s * 0.52f)
+        path.close()
+    }
+
+    private fun addHollowRing(path: Path, size: Float, factor: Float) {
+        // Bullseye ring: bold outer ring CW + hairline orbital moat CCW + 72% solid core CW so ZXing center-sampling sees full ink contrast at 512px.
+        val scaled = size * factor.coerceIn(0.86f, 1.0f)
+        val pad = (size - scaled) / 2f
+        val innerPad = pad + scaled * 0.08f
+        val corePad = pad + scaled * 0.14f
+        path.addOval(Rect(pad, pad, size - pad, size - pad), Path.Direction.Clockwise)
+        path.addOval(Rect(innerPad, innerPad, size - innerPad, size - innerPad), Path.Direction.CounterClockwise)
+        path.addOval(Rect(corePad, corePad, size - corePad, size - corePad), Path.Direction.Clockwise)
+    }
+
+    private fun addConnectedPill(path: Path, size: Float, factor: Float, horizontal: Boolean, neighbors: Neighbors) {
+        val thickness = size * factor
+        val inset = (size - thickness) / 2f
+        val r = thickness * 0.48f
+        if (horizontal) {
+            val left = if (neighbors.left) 0f else inset * 0.45f
+            val right = if (neighbors.right) size else size - inset * 0.45f
+            path.addRoundRect(
+                RoundRect(
+                    Rect(left, inset, right, size - inset),
+                    CornerRadius(if (neighbors.left) 0f else r, if (neighbors.left) 0f else r)
+                )
+            )
+        } else {
+            val top = if (neighbors.top) 0f else inset * 0.45f
+            val bottom = if (neighbors.bottom) size else size - inset * 0.45f
+            path.addRoundRect(
+                RoundRect(
+                    Rect(inset, top, size - inset, bottom),
+                    CornerRadius(r, r)
+                )
+            )
+        }
+    }
+
+    private fun addPolygonCcw(
+        path: Path,
+        size: Float,
+        factor: Float,
+        sides: Int,
+        rotationOffsetDeg: Float
+    ) {
+        val cx = size / 2f
+        val cy = size / 2f
+        val r = (size / 2f) * factor
+        for (i in sides - 1 downTo 0) {
+            val angle = (rotationOffsetDeg + i * (360f / sides)) * PI / 180.0
+            val x = cx + (r * cos(angle)).toFloat()
+            val y = cy + (r * sin(angle)).toFloat()
+            if (i == sides - 1) path.moveTo(x, y) else path.lineTo(x, y)
+        }
         path.close()
     }
 

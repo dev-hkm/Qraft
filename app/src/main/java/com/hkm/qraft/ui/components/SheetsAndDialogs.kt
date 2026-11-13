@@ -44,86 +44,126 @@ import kotlinx.coroutines.launch
 fun CreateQrTypeSheet(
     onDismiss: () -> Unit,
     onSelectType: (QrContentType) -> Unit,
-    onImportQrImage: (() -> Unit)? = null
+    onImportQrImage: (() -> Unit)? = null,
+    onSelectBarcode: ((BarcodeFormatType) -> Unit)? = null,
+    onOpenScanner: (() -> Unit)? = null
 ) {
     val colors = QraftThemeTokens.colors
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = colors.surface,
         dragHandle = { BottomSheetDefaults.DragHandle(color = colors.textTertiary.copy(alpha = 0.45f)) }
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding()
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                text = "Create New QR Code",
+                text = "Create Code",
                 style = MaterialTheme.typography.headlineMedium,
                 color = colors.textPrimary
             )
             Text(
-                text = "Pick a payload format or remix an existing QR image",
+                text = "Pick a QR format, 1D/2D barcode, or scan & remix",
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textSecondary
             )
 
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.heightIn(max = 460.dp)
+                contentPadding = PaddingValues(bottom = 12.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                if (onImportQrImage != null) {
+                if (onOpenScanner != null || onImportQrImage != null) {
                     item {
-                        Surface(
-                            shape = RoundedCornerShape(18.dp),
-                            color = colors.heroBannerBg,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .appleBounceClick {
-                                    onDismiss()
-                                    onImportQrImage()
-                                }
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Row(
-                                modifier = Modifier.padding(14.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Box(
+                            if (onOpenScanner != null) {
+                                Surface(
+                                    shape = RoundedCornerShape(18.dp),
+                                    color = colors.espressoAccent,
                                     modifier = Modifier
-                                        .size(42.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(colors.espressoAccent),
-                                    contentAlignment = Alignment.Center
+                                        .weight(1f)
+                                        .appleBounceClick {
+                                            onDismiss()
+                                            onOpenScanner()
+                                        }
                                 ) {
-                                    Icon(
-                                        Icons.Rounded.QrCodeScanner,
-                                        contentDescription = null,
-                                        tint = colors.espressoAccentContent
-                                    )
+                                    Row(
+                                        modifier = Modifier.padding(14.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.QrCodeScanner,
+                                            contentDescription = null,
+                                            tint = colors.espressoAccentContent
+                                        )
+                                        Column {
+                                            Text(
+                                                "Live Scan",
+                                                style = MaterialTheme.typography.titleSmall,
+                                                color = colors.espressoAccentContent
+                                            )
+                                            Text(
+                                                "Camera",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = colors.espressoAccentContent.copy(alpha = 0.78f)
+                                            )
+                                        }
+                                    }
                                 }
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        "Import & Remix Existing QR",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = colors.heroBannerTitle
-                                    )
-                                    Text(
-                                        "Decode a QR photo from Gallery to edit or restyle",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = colors.heroBannerBody
-                                    )
+                            }
+                            if (onImportQrImage != null) {
+                                Surface(
+                                    shape = RoundedCornerShape(18.dp),
+                                    color = colors.heroBannerBg,
+                                    border = BorderStroke(1.dp, colors.cardBorder),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .appleBounceClick {
+                                            onDismiss()
+                                            onImportQrImage()
+                                        }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(14.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.PhotoLibrary,
+                                            contentDescription = null,
+                                            tint = colors.textPrimary
+                                        )
+                                        Column {
+                                            Text(
+                                                "Import Image",
+                                                style = MaterialTheme.typography.titleSmall,
+                                                color = colors.textPrimary
+                                            )
+                                            Text(
+                                                "Remix QR",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = colors.textSecondary
+                                            )
+                                        }
+                                    }
                                 }
-                                Icon(
-                                    Icons.Rounded.ChevronRight,
-                                    contentDescription = null,
-                                    tint = colors.heroBannerTitle
-                                )
                             }
                         }
                     }
+                }
+                item {
+                    SectionLabel("QR Code Types")
                 }
                 item {
                     FlowGrid(items = QrContentType.entries, columns = 2) { type ->
@@ -178,6 +218,63 @@ fun CreateQrTypeSheet(
                         }
                     }
                 }
+                if (onSelectBarcode != null) {
+                    item {
+                        Spacer(Modifier.height(4.dp))
+                        SectionLabel("1D & 2D Barcodes")
+                    }
+                    item {
+                        FlowGrid(items = BarcodeFormatType.entries, columns = 2) { fmt ->
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
+                                color = colors.background,
+                                border = BorderStroke(1.dp, colors.cardBorder),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .appleBounceClick {
+                                        onDismiss()
+                                        onSelectBarcode(fmt)
+                                    }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(colors.surfaceMuted),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = if (fmt.is2D) Icons.Rounded.GridView else Icons.Rounded.ViewWeek,
+                                            contentDescription = null,
+                                            tint = colors.textPrimary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = fmt.label,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            color = colors.textPrimary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = if (fmt.is2D) "2D Matrix" else "1D Linear",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = colors.textSecondary,
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -197,39 +294,54 @@ fun ExportQrSheet(
     onShare: (ExportImageFormat) -> Unit,
     onCopyImage: () -> Unit,
     onCopyPayload: () -> Unit,
-    onExportPrintSheet: ((PrintSheetLayout, Boolean) -> Unit)? = null
+    onExportPrintSheet: ((PrintSheetLayout, Boolean) -> Unit)? = null,
+    codeKind: CodeKind = CodeKind.QR,
+    barcodeSpec: BarcodeDesignSpec? = null,
+    onBarcodeChange: ((BarcodeDesignSpec) -> Unit)? = null
 ) {
     val colors = QraftThemeTokens.colors
     var selectedFormat by remember(initialFormat) { mutableStateOf(initialFormat) }
     var showPrintSheetOptions by remember { mutableStateOf(false) }
     var printLayout by remember { mutableStateOf(PrintSheetLayout.STICKERS_3X4) }
+    val activeWidthPx = if (codeKind == CodeKind.BARCODE) (barcodeSpec?.exportWidthPx ?: design.exportSizePx) else design.exportSizePx
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = colors.surface,
         dragHandle = { BottomSheetDefaults.DragHandle(color = colors.textTertiary.copy(alpha = 0.45f)) }
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp),
+                .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                QrArtworkPreview(
-                    data = encodedPayload,
-                    design = design,
-                    qrViewportSize = 72.dp,
-                    showCheckerboardForTransparent = true
-                )
+                if (codeKind == CodeKind.BARCODE && barcodeSpec != null) {
+                    BarcodeArtworkPreview(
+                        spec = barcodeSpec,
+                        widthDp = 112.dp,
+                        showCheckerboardForTransparent = true
+                    )
+                } else {
+                    QrArtworkPreview(
+                        data = encodedPayload,
+                        design = design,
+                        qrViewportSize = 72.dp,
+                        showCheckerboardForTransparent = true
+                    )
+                }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = title.ifBlank { "Custom QR Code" },
+                        text = title.ifBlank { if (codeKind == CodeKind.BARCODE) "Custom Barcode" else "Custom QR Code" },
                         style = MaterialTheme.typography.titleLarge,
                         color = colors.textPrimary,
                         maxLines = 1,
@@ -237,9 +349,13 @@ fun ExportQrSheet(
                     )
                     Text(
                         text = when (selectedFormat) {
-                            ExportImageFormat.SVG -> "True Infinite Vector • ${design.exportSizePx}px viewport"
+                            ExportImageFormat.SVG -> "True Infinite Vector • ${activeWidthPx}px viewport"
                             ExportImageFormat.PDF -> "300 DPI Print Sheet • A4 (2480×3508)"
-                            else -> if (design.exportSizePx >= 4096) "4K UHD (${design.exportSizePx}px) • Print Clarity" else "${design.exportSizePx}px High Clarity"
+                            else -> when {
+                                activeWidthPx >= 8192 -> "8K UHD (8192px) • Master Print Quality"
+                                activeWidthPx >= 4096 -> "4K UHD (4096px) • Print Clarity"
+                                else -> "${activeWidthPx}px High Clarity"
+                            }
                         },
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.textSecondary
@@ -250,8 +366,14 @@ fun ExportQrSheet(
             if (selectedFormat != ExportImageFormat.PDF) {
                 SectionLabel("Output Resolution")
                 QraftResolutionSelector(
-                    selectedPx = design.exportSizePx,
-                    onSelect = { px -> onDesignChange(design.copy(exportSizePx = px)) }
+                    selectedPx = activeWidthPx,
+                    onSelect = { px ->
+                        if (codeKind == CodeKind.BARCODE && barcodeSpec != null && onBarcodeChange != null) {
+                            onBarcodeChange(barcodeSpec.copy(exportWidthPx = px))
+                        } else {
+                            onDesignChange(design.copy(exportSizePx = px))
+                        }
+                    }
                 )
             }
 
@@ -439,7 +561,9 @@ fun FullscreenScanDialog(
     title: String,
     encodedPayload: String,
     design: QrDesignSpec,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    codeKind: CodeKind = CodeKind.QR,
+    barcodeSpec: BarcodeDesignSpec? = null
 ) {
     val context = LocalContext.current
     DisposableEffect(Unit) {
@@ -462,7 +586,10 @@ fun FullscreenScanDialog(
 
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
     ) {
         val colors = QraftThemeTokens.colors
         Box(
@@ -483,12 +610,20 @@ fun FullscreenScanDialog(
                     color = colors.textPrimary
                 )
 
-                QrArtworkPreview(
-                    data = encodedPayload,
-                    design = design,
-                    qrViewportSize = 276.dp,
-                    showCheckerboardForTransparent = false
-                )
+                if (codeKind == CodeKind.BARCODE && barcodeSpec != null) {
+                    BarcodeArtworkPreview(
+                        spec = barcodeSpec,
+                        widthDp = 304.dp,
+                        showCheckerboardForTransparent = false
+                    )
+                } else {
+                    QrArtworkPreview(
+                        data = encodedPayload,
+                        design = design,
+                        qrViewportSize = 276.dp,
+                        showCheckerboardForTransparent = false
+                    )
+                }
 
                 Surface(
                     shape = RoundedCornerShape(50),
@@ -593,15 +728,18 @@ fun BatchGeneratorSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = colors.surface,
         dragHandle = { BottomSheetDefaults.DragHandle(color = colors.textTertiary.copy(alpha = 0.45f)) }
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp),
+                .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Text("Batch QR Generator Pro", style = MaterialTheme.typography.headlineMedium, color = colors.textPrimary)
@@ -792,15 +930,18 @@ fun SettingsModalSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = colors.surface,
         dragHandle = { BottomSheetDefaults.DragHandle(color = colors.textTertiary.copy(alpha = 0.45f)) }
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp),
+                .padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text("Studio Preferences", style = MaterialTheme.typography.headlineMedium, color = colors.textPrimary)

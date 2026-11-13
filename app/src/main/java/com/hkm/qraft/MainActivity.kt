@@ -39,11 +39,16 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.hkm.qraft.model.BarcodeDesignSpec
+import com.hkm.qraft.model.BarcodeFormatType
+import com.hkm.qraft.model.CodeKind
+import com.hkm.qraft.model.QrDesignSpec
 import com.hkm.qraft.model.ThemeMode
 import com.hkm.qraft.qr.QrPayloadEncoder
 import com.hkm.qraft.ui.components.*
 import com.hkm.qraft.ui.screens.HomeScreen
 import com.hkm.qraft.ui.screens.LibraryScreen
+import com.hkm.qraft.ui.screens.ScannerScreen
 import com.hkm.qraft.ui.screens.StudioScreen
 import com.hkm.qraft.ui.theme.QraftTheme
 import com.hkm.qraft.ui.theme.QraftThemeTokens
@@ -54,7 +59,16 @@ private object Routes {
     const val HOME = "home"
     const val STUDIO = "studio"
     const val LIBRARY = "library"
+    const val SCANNER = "scanner"
 }
+
+private data class FullscreenPreviewState(
+    val title: String,
+    val encodedPayload: String,
+    val design: QrDesignSpec,
+    val codeKind: CodeKind = CodeKind.QR,
+    val barcode: BarcodeDesignSpec = BarcodeDesignSpec()
+)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -168,7 +182,7 @@ fun QraftAppRoot(
     var showExportSheet by remember { mutableStateOf(false) }
     var showBatchSheet by remember { mutableStateOf(false) }
     var showSettingsSheet by remember { mutableStateOf(false) }
-    var fullscreenItem by remember { mutableStateOf<Triple<String, String, com.hkm.qraft.model.QrDesignSpec>?>(null) }
+    var fullscreenItem by remember { mutableStateOf<FullscreenPreviewState?>(null) }
 
     var bannerMessage by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
@@ -209,15 +223,24 @@ fun QraftAppRoot(
                         viewModel.startNewQr(type)
                         navController.navigate(Routes.STUDIO)
                     },
+                    onOpenStudioNewBarcode = {
+                        viewModel.startNewBarcode(BarcodeFormatType.CODE_128)
+                        navController.navigate(Routes.STUDIO)
+                    },
+                    onOpenScanner = {
+                        navController.navigate(Routes.SCANNER) { launchSingleTop = true }
+                    },
                     onOpenExisting = { item ->
                         viewModel.openExistingQr(item)
                         navController.navigate(Routes.STUDIO)
                     },
                     onQuickFullscreen = { item ->
-                        fullscreenItem = Triple(
-                            item.title,
-                            QrPayloadEncoder.encode(item.type, item.payload),
-                            item.design
+                        fullscreenItem = FullscreenPreviewState(
+                            title = item.title,
+                            encodedPayload = QrPayloadEncoder.encode(item.type, item.payload),
+                            design = item.design,
+                            codeKind = item.resolvedCodeKind(),
+                            barcode = item.resolvedBarcode()
                         )
                     },
                     onToggleFavorite = viewModel::toggleItemFavorite,
@@ -240,15 +263,20 @@ fun QraftAppRoot(
                     onToggleFavorite = viewModel::toggleItemFavorite,
                     onDelete = viewModel::deleteItem,
                     onQuickFullscreen = { item ->
-                        fullscreenItem = Triple(
-                            item.title,
-                            QrPayloadEncoder.encode(item.type, item.payload),
-                            item.design
+                        fullscreenItem = FullscreenPreviewState(
+                            title = item.title,
+                            encodedPayload = QrPayloadEncoder.encode(item.type, item.payload),
+                            design = item.design,
+                            codeKind = item.resolvedCodeKind(),
+                            barcode = item.resolvedBarcode()
                         )
                     },
                     onOpenBatch = { showBatchSheet = true },
                     onCreateNew = { showCreatePicker = true },
                     onImportQr = launchQrImport,
+                    onOpenScanner = {
+                        navController.navigate(Routes.SCANNER) { launchSingleTop = true }
+                    },
                     onBulkFavorite = viewModel::bulkSetFavorite,
                     onBulkDelete = viewModel::bulkDeleteItems,
                     onExportPrintSheet = viewModel::exportLibraryPrintSheet
@@ -268,9 +296,11 @@ fun QraftAppRoot(
                     onExtractBrandColors = viewModel::extractAndApplyBrandPalette,
                     onBack = { navController.popBackStack() },
                     onTitleChange = viewModel::updateDraftTitle,
+                    onCodeKindChange = viewModel::setDraftCodeKind,
                     onTypeChange = viewModel::updateDraftType,
                     onFieldsChange = viewModel::updateDraftPayload,
                     onDesignChange = viewModel::updateDraftDesign,
+                    onBarcodeChange = viewModel::updateDraftBarcode,
                     onPickLogoPhoto = viewModel::persistAndApplyLogoUri,
                     onPickBackgroundPhoto = viewModel::persistAndApplyBackgroundPhotoUri,
                     onToggleFavorite = viewModel::toggleDraftFavorite,
@@ -282,12 +312,29 @@ fun QraftAppRoot(
                     onSaveToLibrary = { viewModel.saveDraftToLibrary() },
                     onOpenExport = { showExportSheet = true },
                     onOpenFullscreen = {
-                        fullscreenItem = Triple(
-                            draft.effectiveTitle,
-                            draft.encodedPayload,
-                            draft.design
+                        fullscreenItem = FullscreenPreviewState(
+                            title = draft.effectiveTitle,
+                            encodedPayload = draft.encodedPayload,
+                            design = draft.design,
+                            codeKind = draft.codeKind,
+                            barcode = draft.barcode
                         )
                     }
+                )
+            }
+
+            composable(Routes.SCANNER) {
+                ScannerScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenInStudio = { rawText, barcodeFormat ->
+                        viewModel.openScannedInStudio(rawText, barcodeFormat)
+                        navController.navigate(Routes.STUDIO) {
+                            popUpTo(Routes.SCANNER) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    },
+                    onSaveToLibrary = viewModel::saveScannedToLibrary,
+                    onCopyResult = viewModel::copyRawText
                 )
             }
         }
@@ -336,7 +383,14 @@ fun QraftAppRoot(
                 viewModel.startNewQr(type)
                 navController.navigate(Routes.STUDIO)
             },
-            onImportQrImage = launchQrImport
+            onSelectBarcode = { format ->
+                viewModel.startNewBarcode(format)
+                navController.navigate(Routes.STUDIO)
+            },
+            onImportQrImage = launchQrImport,
+            onOpenScanner = {
+                navController.navigate(Routes.SCANNER) { launchSingleTop = true }
+            }
         )
     }
 
@@ -361,7 +415,10 @@ fun QraftAppRoot(
                     layout = layout,
                     asPdf = asPdf
                 )
-            }
+            },
+            codeKind = draft.codeKind,
+            barcodeSpec = draft.barcode,
+            onBarcodeChange = viewModel::updateDraftBarcode
         )
     }
 
@@ -389,7 +446,7 @@ fun QraftAppRoot(
             onDefaultFormatChange = viewModel::setDefaultExportFormat,
             onDefaultResolutionChange = viewModel::setDefaultExportResolution,
             onExportBackup = {
-                backupExportLauncher.launch("qraft_backup_v4.qraft")
+                backupExportLauncher.launch("qraft_backup_v5.qraft")
             },
             onImportBackup = {
                 backupImportLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
@@ -397,12 +454,14 @@ fun QraftAppRoot(
         )
     }
 
-    fullscreenItem?.let { (title, payload, design) ->
+    fullscreenItem?.let { preview ->
         FullscreenScanDialog(
-            title = title,
-            encodedPayload = payload,
-            design = design,
-            onDismiss = { fullscreenItem = null }
+            title = preview.title,
+            encodedPayload = preview.encodedPayload,
+            design = preview.design,
+            onDismiss = { fullscreenItem = null },
+            codeKind = preview.codeKind,
+            barcodeSpec = preview.barcode
         )
     }
 }

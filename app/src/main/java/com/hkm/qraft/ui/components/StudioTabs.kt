@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hkm.qraft.model.*
+import com.hkm.qraft.qr.BarcodeEngine
 import com.hkm.qraft.qr.CustomQrShapes
 import com.hkm.qraft.qr.LogoCatalog
 import com.hkm.qraft.qr.QrEngine
@@ -52,6 +53,12 @@ fun PresetsEditorTab(
 ) {
     val colors = QraftThemeTokens.colors
     var showSaveDialog by remember { mutableStateOf(false) }
+    var selectedCategory by remember { mutableStateOf(PresetCategory.ALL) }
+
+    val filteredBuiltIns = remember(builtInPresets, selectedCategory) {
+        if (selectedCategory == PresetCategory.ALL) builtInPresets
+        else builtInPresets.filter { it.resolvedCategory() == selectedCategory }
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Row(
@@ -59,7 +66,7 @@ fun PresetsEditorTab(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            SectionLabel("Designer Themes")
+            SectionLabel("Designer Themes (${builtInPresets.size})")
             OutlinedButton(
                 onClick = { showSaveDialog = true },
                 shape = RoundedCornerShape(50),
@@ -72,7 +79,20 @@ fun PresetsEditorTab(
             }
         }
 
-        if (customPresets.isNotEmpty()) {
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            PresetCategory.entries.forEach { cat ->
+                SelectableChip(
+                    label = cat.label,
+                    selected = selectedCategory == cat,
+                    onClick = { selectedCategory = cat }
+                )
+            }
+        }
+
+        if (customPresets.isNotEmpty() && selectedCategory == PresetCategory.ALL) {
             SectionLabel("Your Saved Styles")
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 customPresets.forEach { preset ->
@@ -86,9 +106,9 @@ fun PresetsEditorTab(
             }
         }
 
-        SectionLabel("Curated Presets")
+        SectionLabel(if (selectedCategory == PresetCategory.ALL) "Curated Studio Templates" else selectedCategory.label)
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            builtInPresets.forEach { preset ->
+            filteredBuiltIns.forEach { preset ->
                 PresetRowCard(
                     preset = preset,
                     isSelected = preset.design == currentDesign,
@@ -249,140 +269,164 @@ fun ShapesEditorTab(
 ) {
     val colors = QraftThemeTokens.colors
 
-    Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
-        // 1. Data Pixels
-        SectionLabel("Data Modules (12 Shapes)")
-        FlowGrid(items = QrPixelStyle.entries, columns = 4) { style ->
-            val selected = design.pixelStyle == style
-            ShapePreviewTile(
-                label = style.label,
-                selected = selected,
-                onClick = { onDesignChange(design.copy(pixelStyle = style)) }
-            ) {
-                Canvas(modifier = Modifier.size(26.dp)) {
-                    val modifierShape = CustomQrShapes.pixelShape(style, 0.38f, 0.9f)
-                    val path = Path()
-                    modifierShape.run { path.path(size.minDimension, io.github.alexzhirkevich.qrose.Neighbors()) }
-                    drawPath(
-                        path = path,
-                        color = if (selected) colors.activePillContent else colors.textPrimary
-                    )
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        // 1. Data Pixels inside a single clean studio surface (zero per-button outline clutter)
+        QraftSectionCard(contentPadding = PaddingValues(14.dp)) {
+            SectionLabel("Data Modules (${QrPixelStyle.entries.size})")
+            Spacer(Modifier.height(10.dp))
+            FlowGrid(items = QrPixelStyle.entries, columns = 4) { style ->
+                val selected = design.pixelStyle == style
+                ShapePreviewTile(
+                    label = style.label,
+                    selected = selected,
+                    onClick = { onDesignChange(design.copy(pixelStyle = style)) }
+                ) {
+                    Canvas(modifier = Modifier.size(22.dp)) {
+                        val modifierShape = CustomQrShapes.pixelShape(style, 0.38f, 0.88f)
+                        val path = Path()
+                        if (style == QrPixelStyle.RING) {
+                            path.fillType = androidx.compose.ui.graphics.PathFillType.EvenOdd
+                        }
+                        val glyphNeighbors = when (style) {
+                            QrPixelStyle.WAVE_H -> io.github.alexzhirkevich.qrose.Neighbors(left = true, right = true)
+                            QrPixelStyle.WAVE_V -> io.github.alexzhirkevich.qrose.Neighbors(top = true, bottom = true)
+                            else -> io.github.alexzhirkevich.qrose.Neighbors()
+                        }
+                        modifierShape.run { path.path(size.minDimension, glyphNeighbors) }
+                        drawPath(
+                            path = path,
+                            color = if (selected) colors.activePillContent else colors.textPrimary
+                        )
+                    }
                 }
+            }
+            Spacer(Modifier.height(12.dp))
+            if (design.pixelStyle in setOf(QrPixelStyle.ROUNDED, QrPixelStyle.LIQUID)) {
+                LabeledSlider(
+                    label = "Corner Roundness",
+                    valueText = "${(design.pixelCornerRoundness * 200).roundToInt()}%",
+                    value = design.pixelCornerRoundness,
+                    valueRange = 0.05f..0.50f,
+                    onValueChange = { onDesignChange(design.copy(pixelCornerRoundness = it)) }
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+            LabeledSlider(
+                label = "Module Density / Scale",
+                valueText = "${(design.pixelSizeFactor * 100).roundToInt()}%",
+                value = design.pixelSizeFactor,
+                valueRange = 0.50f..1.00f,
+                onValueChange = { onDesignChange(design.copy(pixelSizeFactor = it)) }
+            )
+        }
+
+        // 2. Finder Eye Frame inside clean studio card
+        QraftSectionCard(contentPadding = PaddingValues(14.dp)) {
+            SectionLabel("Finder Eye Frames (${QrEyeFrameStyle.entries.size})")
+            Spacer(Modifier.height(10.dp))
+            FlowGrid(items = QrEyeFrameStyle.entries, columns = 4) { style ->
+                val selected = design.eyeFrameStyle == style
+                ShapePreviewTile(
+                    label = style.label,
+                    selected = selected,
+                    onClick = { onDesignChange(design.copy(eyeFrameStyle = style)) }
+                ) {
+                    Canvas(modifier = Modifier.size(22.dp)) {
+                        val shape = CustomQrShapes.frameShape(style, 0.32f)
+                        val p = Path()
+                        p.fillType = androidx.compose.ui.graphics.PathFillType.EvenOdd
+                        shape.run { p.path(size.minDimension, io.github.alexzhirkevich.qrose.Neighbors()) }
+                        drawPath(
+                            path = p,
+                            color = if (selected) colors.activePillContent else colors.textPrimary
+                        )
+                    }
+                }
+            }
+
+            if (design.eyeFrameStyle in setOf(
+                    QrEyeFrameStyle.ROUNDED,
+                    QrEyeFrameStyle.LEAF_TL_BR,
+                    QrEyeFrameStyle.LEAF_TR_BL,
+                    QrEyeFrameStyle.THREE_ROUND
+                )
+            ) {
+                Spacer(Modifier.height(12.dp))
+                LabeledSlider(
+                    label = "Eye Frame Roundness",
+                    valueText = "${(design.eyeFrameRoundness * 200).roundToInt()}%",
+                    value = design.eyeFrameRoundness,
+                    valueRange = 0.05f..0.50f,
+                    onValueChange = { onDesignChange(design.copy(eyeFrameRoundness = it)) }
+                )
             }
         }
 
-        if (design.pixelStyle in setOf(QrPixelStyle.ROUNDED, QrPixelStyle.LIQUID)) {
-            LabeledSlider(
-                label = "Module Corner Radius",
-                valueText = "${(design.pixelCornerRoundness * 200).roundToInt()}%",
-                value = design.pixelCornerRoundness,
-                valueRange = 0.05f..0.50f,
-                onValueChange = { onDesignChange(design.copy(pixelCornerRoundness = it)) }
-            )
-        }
-
-        LabeledSlider(
-            label = "Module Density / Scale",
-            valueText = "${(design.pixelSizeFactor * 100).roundToInt()}%",
-            value = design.pixelSizeFactor,
-            valueRange = 0.55f..1.00f,
-            onValueChange = { onDesignChange(design.copy(pixelSizeFactor = it)) }
-        )
-
-        // 2. Eye Frame
-        SectionLabel("Finder Eye Frames (8 Shapes)")
-        FlowGrid(items = QrEyeFrameStyle.entries, columns = 4) { style ->
-            val selected = design.eyeFrameStyle == style
-            ShapePreviewTile(
-                label = style.label,
-                selected = selected,
-                onClick = { onDesignChange(design.copy(eyeFrameStyle = style)) }
-            ) {
-                Canvas(modifier = Modifier.size(26.dp)) {
-                    val shape = CustomQrShapes.frameShape(style, 0.32f)
-                    val p = Path()
-                    p.fillType = androidx.compose.ui.graphics.PathFillType.EvenOdd
-                    shape.run { p.path(size.minDimension, io.github.alexzhirkevich.qrose.Neighbors()) }
-                    drawPath(
-                        path = p,
-                        color = if (selected) colors.activePillContent else colors.textPrimary
-                    )
-                }
-            }
-        }
-
-        if (design.eyeFrameStyle in setOf(
-                QrEyeFrameStyle.ROUNDED,
-                QrEyeFrameStyle.LEAF_TL_BR,
-                QrEyeFrameStyle.LEAF_TR_BL,
-                QrEyeFrameStyle.THREE_ROUND
-            )
-        ) {
-            LabeledSlider(
-                label = "Eye Frame Roundness",
-                valueText = "${(design.eyeFrameRoundness * 200).roundToInt()}%",
-                value = design.eyeFrameRoundness,
-                valueRange = 0.05f..0.50f,
-                onValueChange = { onDesignChange(design.copy(eyeFrameRoundness = it)) }
-            )
-        }
-
-        // 3. Eye Ball
-        SectionLabel("Finder Eye Center Balls (8 Shapes)")
-        FlowGrid(items = QrEyeBallStyle.entries, columns = 4) { style ->
-            val selected = design.eyeBallStyle == style
-            ShapePreviewTile(
-                label = style.label,
-                selected = selected,
-                onClick = { onDesignChange(design.copy(eyeBallStyle = style)) }
-            ) {
-                Canvas(modifier = Modifier.size(22.dp)) {
-                    val shape = CustomQrShapes.ballShape(style, 0.35f)
-                    val p = Path()
-                    shape.run { p.path(size.minDimension, io.github.alexzhirkevich.qrose.Neighbors()) }
-                    drawPath(
-                        path = p,
-                        color = if (selected) colors.activePillContent else colors.espressoAccent
-                    )
+        // 3. Eye Ball inside clean studio card
+        QraftSectionCard(contentPadding = PaddingValues(14.dp)) {
+            SectionLabel("Finder Eye Balls (${QrEyeBallStyle.entries.size})")
+            Spacer(Modifier.height(10.dp))
+            FlowGrid(items = QrEyeBallStyle.entries, columns = 5) { style ->
+                val selected = design.eyeBallStyle == style
+                ShapePreviewTile(
+                    label = style.label,
+                    selected = selected,
+                    onClick = { onDesignChange(design.copy(eyeBallStyle = style)) }
+                ) {
+                    Canvas(modifier = Modifier.size(20.dp)) {
+                        val shape = CustomQrShapes.ballShape(style, 0.35f)
+                        val p = Path()
+                        shape.run { p.path(size.minDimension, io.github.alexzhirkevich.qrose.Neighbors()) }
+                        drawPath(
+                            path = p,
+                            color = if (selected) colors.activePillContent else colors.espressoAccent
+                        )
+                    }
                 }
             }
         }
 
         // 4. Overall QR Silhouette & Light Dots & 4th Eye
-        SectionLabel("QR Matrix Silhouette")
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.horizontalScroll(rememberScrollState())
-        ) {
-            QrCodeSilhouette.entries.forEach { sil ->
-                SelectableChip(
-                    label = sil.label,
-                    selected = design.codeSilhouette == sil,
-                    onClick = { onDesignChange(design.copy(codeSilhouette = sil)) }
-                )
+        QraftSectionCard(contentPadding = PaddingValues(14.dp)) {
+            SectionLabel("Matrix Silhouette")
+            Spacer(Modifier.height(8.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.horizontalScroll(rememberScrollState())
+            ) {
+                QrCodeSilhouette.entries.forEach { sil ->
+                    SelectableChip(
+                        label = sil.label,
+                        selected = design.codeSilhouette == sil,
+                        onClick = { onDesignChange(design.copy(codeSilhouette = sil)) }
+                    )
+                }
             }
-        }
 
-        SectionLabel("Subtle Light-Module Pattern")
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.horizontalScroll(rememberScrollState())
-        ) {
-            QrLightPixelStyle.entries.forEach { lp ->
-                SelectableChip(
-                    label = lp.label,
-                    selected = design.lightPixelStyle == lp,
-                    onClick = { onDesignChange(design.copy(lightPixelStyle = lp)) }
-                )
+            Spacer(Modifier.height(14.dp))
+            SectionLabel("Subtle Light-Module Pattern")
+            Spacer(Modifier.height(8.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.horizontalScroll(rememberScrollState())
+            ) {
+                QrLightPixelStyle.entries.forEach { lp ->
+                    SelectableChip(
+                        label = lp.label,
+                        selected = design.lightPixelStyle == lp,
+                        onClick = { onDesignChange(design.copy(lightPixelStyle = lp)) }
+                    )
+                }
             }
-        }
 
-        ToggleRow(
-            title = "4th Corner Alignment Eye",
-            subtitle = "Adds a decorative stylized eye at bottom-right",
-            checked = design.fourthEyeEnabled,
-            onCheckedChange = { onDesignChange(design.copy(fourthEyeEnabled = it)) }
-        )
+            Spacer(Modifier.height(12.dp))
+            ToggleRow(
+                title = "4th Corner Alignment Eye",
+                subtitle = "Adds a stylized decorative eye at bottom-right",
+                checked = design.fourthEyeEnabled,
+                onCheckedChange = { onDesignChange(design.copy(fourthEyeEnabled = it)) }
+            )
+        }
     }
 }
 
@@ -441,6 +485,48 @@ fun ColorsEditorTab(
 
         when (target) {
             ColorTarget.PIXELS -> {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (design.darkBrush.mode != BrushMode.SOLID) {
+                        OutlinedButton(
+                            onClick = {
+                                val b = design.darkBrush
+                                onDesignChange(design.copy(darkBrush = b.copy(primaryColor = b.secondaryColor, secondaryColor = b.primaryColor)))
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            border = BorderStroke(1.dp, colors.cardBorder),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Rounded.SwapHoriz, null, modifier = Modifier.size(16.dp), tint = colors.textPrimary)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Swap Gradient", color = colors.textPrimary, style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            val fg = design.darkBrush.primaryColor
+                            val bg = design.background.brush.primaryColor
+                            onDesignChange(
+                                design.copy(
+                                    darkBrush = design.darkBrush.copy(primaryColor = bg),
+                                    background = design.background.copy(
+                                        mode = BackgroundMode.SOLID,
+                                        brush = design.background.brush.copy(primaryColor = fg)
+                                    )
+                                )
+                            )
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, colors.cardBorder),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Rounded.InvertColors, null, modifier = Modifier.size(16.dp), tint = colors.textPrimary)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Invert Ink / Bg", color = colors.textPrimary, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
                 BrushEditorCard(
                     title = "Data Pixel Color & Gradient",
                     brush = design.darkBrush,
@@ -967,6 +1053,14 @@ fun LogoEditorTab(
                 onValueChange = { onDesignChange(design.copy(logo = logo.copy(sizeFraction = it))) }
             )
 
+            LabeledSlider(
+                label = "Logo Rotation Angle",
+                valueText = "${logo.effectiveRotationDeg().roundToInt()}°",
+                value = logo.effectiveRotationDeg(),
+                valueRange = -45f..45f,
+                onValueChange = { onDesignChange(design.copy(logo = logo.copy(rotationDeg = it))) }
+            )
+
             SectionLabel("Logo Mask Shape")
             Row(
                 modifier = Modifier.horizontalScroll(rememberScrollState()),
@@ -1037,6 +1131,13 @@ fun LogoEditorTab(
                         }
                     }
                 )
+                LabeledSlider(
+                    label = "Border Ring Width",
+                    valueText = "${(logo.effectiveBorderWidthFraction() * 100).roundToInt()}%",
+                    value = logo.effectiveBorderWidthFraction(),
+                    valueRange = 0.015f..0.12f,
+                    onValueChange = { onDesignChange(design.copy(logo = logo.copy(borderWidthFraction = it))) }
+                )
             }
         }
     }
@@ -1060,7 +1161,26 @@ fun FrameAndProTab(
     var colorDialog by remember { mutableStateOf<Triple<String, Long, (Long) -> Unit>?>(null) }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        SectionLabel("Outer Card & Sticker Frame")
+        ToggleRow(
+            title = "Use Decorative Frame Card",
+            subtitle = "Optional — turn off to export a pure, unframed QR image",
+            checked = frame.style != OuterFrameStyle.NONE,
+            onCheckedChange = { enabled ->
+                onDesignChange(
+                    design.copy(
+                        outerFrame = frame.copy(
+                            style = if (enabled) {
+                                if (frame.style == OuterFrameStyle.NONE) OuterFrameStyle.CLEAN_CARD else frame.style
+                            } else {
+                                OuterFrameStyle.NONE
+                            }
+                        )
+                    )
+                )
+            }
+        )
+
+        SectionLabel("Frame Styles (${OuterFrameStyle.entries.size})")
         Row(
             modifier = Modifier.horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1078,17 +1198,22 @@ fun FrameAndProTab(
             val hasLabel = frame.style in setOf(
                 OuterFrameStyle.BOTTOM_SCAN_BANNER,
                 OuterFrameStyle.TOP_BADGE_CARD,
+                OuterFrameStyle.SCAN_BAR_HEADER,
                 OuterFrameStyle.SPEECH_BUBBLE,
                 OuterFrameStyle.POLAROID_STAMP,
                 OuterFrameStyle.DOUBLE_PILL,
                 OuterFrameStyle.WARM_POSTER,
                 OuterFrameStyle.GLASS_CARD,
-                OuterFrameStyle.CORNER_BRACKET
+                OuterFrameStyle.CORNER_BRACKET,
+                OuterFrameStyle.TICKET_STUB,
+                OuterFrameStyle.NEON_GLOW,
+                OuterFrameStyle.CIRCULAR_STAMP,
+                OuterFrameStyle.MINIMAL_OUTLINE
             )
             if (hasLabel) {
                 QraftTextField(
                     value = frame.label,
-                    onValueChange = { onDesignChange(design.copy(outerFrame = frame.copy(label = it.take(22)))) },
+                    onValueChange = { onDesignChange(design.copy(outerFrame = frame.copy(label = it.take(24)))) },
                     label = "Callout Label",
                     placeholder = "SCAN ME",
                     leadingIcon = Icons.Rounded.Campaign
@@ -1097,7 +1222,7 @@ fun FrameAndProTab(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf("SCAN ME", "JOIN WI-FI", "OPEN LINK", "ADD CONTACT", "PAY HERE", "MENU").forEach { quick ->
+                    listOf("SCAN ME", "JOIN WI-FI", "OPEN LINK", "ADMIT ONE", "PAY HERE", "VERIFIED").forEach { quick ->
                         SelectableChip(
                             label = quick,
                             selected = frame.label == quick,
@@ -1105,12 +1230,15 @@ fun FrameAndProTab(
                         )
                     }
                 }
-                if (frame.style == OuterFrameStyle.DOUBLE_PILL) {
+                if (frame.style == OuterFrameStyle.DOUBLE_PILL ||
+                    frame.style == OuterFrameStyle.WARM_POSTER ||
+                    frame.style == OuterFrameStyle.TICKET_STUB
+                ) {
                     QraftTextField(
                         value = frame.subtitle,
-                        onValueChange = { onDesignChange(design.copy(outerFrame = frame.copy(subtitle = it.take(26)))) },
-                        label = "Bottom Pill Text",
-                        placeholder = "TAP CAMERA TO OPEN"
+                        onValueChange = { onDesignChange(design.copy(outerFrame = frame.copy(subtitle = it.take(28)))) },
+                        label = if (frame.style == OuterFrameStyle.TICKET_STUB) "Ticket Subtitle" else "Bottom / Secondary Text",
+                        placeholder = "PRESENT AT GATE"
                     )
                 }
             }
@@ -1133,7 +1261,12 @@ fun FrameAndProTab(
                     }
                 }
             )
-            if (frame.style == OuterFrameStyle.GRADIENT_BORDER || frame.style == OuterFrameStyle.WARM_POSTER) {
+            if (frame.style in setOf(
+                    OuterFrameStyle.GRADIENT_BORDER,
+                    OuterFrameStyle.WARM_POSTER,
+                    OuterFrameStyle.NEON_GLOW
+                )
+            ) {
                 ColorSwatchRow(
                     label = "Secondary Accent",
                     argb = frame.accentSecondaryColor,
@@ -1157,6 +1290,14 @@ fun FrameAndProTab(
             }
 
             LabeledSlider(
+                label = "Frame Inner Padding",
+                valueText = "${(frame.effectivePaddingFraction() * 100).roundToInt()}%",
+                value = frame.effectivePaddingFraction(),
+                valueRange = 0.04f..0.16f,
+                onValueChange = { onDesignChange(design.copy(outerFrame = frame.copy(framePaddingFraction = it))) }
+            )
+
+            LabeledSlider(
                 label = "Frame Corner Radius",
                 valueText = "${frame.cornerRadiusDp.roundToInt()} dp",
                 value = frame.cornerRadiusDp,
@@ -1164,7 +1305,7 @@ fun FrameAndProTab(
                 onValueChange = { onDesignChange(design.copy(outerFrame = frame.copy(cornerRadiusDp = it))) }
             )
 
-            if (frame.style != OuterFrameStyle.GRADIENT_BORDER) {
+            if (frame.style !in setOf(OuterFrameStyle.GRADIENT_BORDER, OuterFrameStyle.NEON_GLOW, OuterFrameStyle.MINIMAL_OUTLINE)) {
                 LabeledSlider(
                     label = "Card Border Outline",
                     valueText = "${frame.borderThicknessDp.roundToInt()} dp",
@@ -1305,22 +1446,19 @@ private fun ShapePreviewTile(
     val colors = QraftThemeTokens.colors
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
         modifier = Modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (selected) colors.activePillBg else colors.surface)
-            .border(
-                width = if (selected) 1.5.dp else 1.dp,
-                color = if (selected) colors.activePillBg else colors.cardBorder,
-                shape = RoundedCornerShape(16.dp)
-            )
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (selected) colors.activePillBg else Color.Transparent)
             .appleBounceClick { onClick() }
-            .padding(vertical = 10.dp, horizontal = 4.dp)
+            .padding(vertical = 8.dp, horizontal = 3.dp)
     ) {
         preview()
         Text(
             text = label,
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+            ),
             color = if (selected) colors.activePillContent else colors.textSecondary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -1351,5 +1489,218 @@ fun <T> FlowGrid(
                 }
             }
         }
+    }
+}
+
+@Composable
+fun BarcodeEditorPanel(
+    spec: BarcodeDesignSpec,
+    onSpecChange: (BarcodeDesignSpec) -> Unit
+) {
+    val colors = QraftThemeTokens.colors
+    var colorDialog by remember { mutableStateOf<Triple<String, Long, (Long) -> Unit>?>(null) }
+    val validation = remember(spec.format, spec.data) {
+        BarcodeEngine.normalizeAndValidate(spec.format, spec.data)
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        SectionLabel("1D & 2D Symbology (${BarcodeFormatType.entries.size})")
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            BarcodeFormatType.entries.forEach { fmt ->
+                SelectableChip(
+                    label = fmt.label,
+                    selected = spec.format == fmt,
+                    onClick = {
+                        onSpecChange(
+                            spec.copy(
+                                format = fmt,
+                                data = if (spec.data.isBlank() || spec.data == spec.format.defaultSample) fmt.defaultSample else spec.data
+                            )
+                        )
+                    }
+                )
+            }
+        }
+
+        QraftSectionCard(contentPadding = PaddingValues(14.dp)) {
+            QraftTextField(
+                value = spec.data,
+                onValueChange = { onSpecChange(spec.copy(data = it)) },
+                label = "${spec.format.label} Payload",
+                placeholder = spec.format.defaultSample,
+                leadingIcon = Icons.Rounded.ViewWeek
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = if (!validation.isValid) {
+                    validation.warningOrError ?: spec.format.helperText
+                } else {
+                    "${spec.format.helperText} • Encoded: ${validation.normalizedData}"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (!validation.isValid) colors.dangerFg else colors.textSecondary
+            )
+            if (validation.isValid && validation.normalizedData != spec.data.trim()) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = { onSpecChange(spec.copy(data = validation.normalizedData)) },
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, colors.cardBorder)
+                ) {
+                    Text(
+                        "Apply Auto Check Digit (${validation.normalizedData.last()})",
+                        color = colors.textPrimary,
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+            }
+        }
+
+        QraftSectionCard(contentPadding = PaddingValues(14.dp)) {
+            SectionLabel("Bar Geometry & Labels")
+            Spacer(Modifier.height(10.dp))
+            ToggleRow(
+                title = "Rounded Bar Tips / Modules",
+                subtitle = "Softens edges of linear bars & 2D cells",
+                checked = spec.roundedBars,
+                onCheckedChange = { onSpecChange(spec.copy(roundedBars = it)) }
+            )
+            Spacer(Modifier.height(8.dp))
+            ToggleRow(
+                title = "Show Human-Readable Text",
+                subtitle = "Prints decoded characters cleanly underneath",
+                checked = spec.showText,
+                onCheckedChange = { onSpecChange(spec.copy(showText = it)) }
+            )
+            Spacer(Modifier.height(10.dp))
+            LabeledSlider(
+                label = "Quiet Zone Margin",
+                valueText = "${(spec.quietMarginFraction * 100).roundToInt()}%",
+                value = spec.quietMarginFraction,
+                valueRange = 0.03f..0.14f,
+                onValueChange = { onSpecChange(spec.copy(quietMarginFraction = it)) }
+            )
+        }
+
+        QraftSectionCard(contentPadding = PaddingValues(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SectionLabel("Colors")
+                TextButton(
+                    onClick = {
+                        onSpecChange(
+                            spec.copy(
+                                foregroundColor = spec.backgroundColor,
+                                backgroundColor = spec.foregroundColor,
+                                transparentBg = false
+                            )
+                        )
+                    }
+                ) {
+                    Icon(Icons.Rounded.InvertColors, null, modifier = Modifier.size(16.dp), tint = colors.textPrimary)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Invert", color = colors.textPrimary, style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            ColorSwatchRow(
+                label = "Bar / Ink Color",
+                argb = spec.foregroundColor,
+                onClick = {
+                    colorDialog = Triple("Bar Ink Color", spec.foregroundColor) { c ->
+                        onSpecChange(spec.copy(foregroundColor = c))
+                    }
+                }
+            )
+            Spacer(Modifier.height(8.dp))
+            ToggleRow(
+                title = "Transparent Background",
+                subtitle = "Export cutout bars without solid fill",
+                checked = spec.transparentBg,
+                onCheckedChange = { onSpecChange(spec.copy(transparentBg = it)) }
+            )
+            if (!spec.transparentBg) {
+                Spacer(Modifier.height(8.dp))
+                ColorSwatchRow(
+                    label = "Background Fill",
+                    argb = spec.backgroundColor,
+                    onClick = {
+                        colorDialog = Triple("Barcode Background", spec.backgroundColor) { c ->
+                            onSpecChange(spec.copy(backgroundColor = c))
+                        }
+                    }
+                )
+            }
+        }
+
+        QraftSectionCard(contentPadding = PaddingValues(14.dp)) {
+            ToggleRow(
+                title = "Optional Card Frame",
+                subtitle = "Wrap barcode inside a rounded label card",
+                checked = spec.framed,
+                onCheckedChange = { onSpecChange(spec.copy(framed = it)) }
+            )
+            if (spec.framed) {
+                Spacer(Modifier.height(10.dp))
+                QraftTextField(
+                    value = spec.caption,
+                    onValueChange = { onSpecChange(spec.copy(caption = it.take(30))) },
+                    label = "Optional Header Caption",
+                    placeholder = "e.g. SKU / INVENTORY TAG",
+                    leadingIcon = Icons.Rounded.Label
+                )
+                Spacer(Modifier.height(8.dp))
+                ColorSwatchRow(
+                    label = "Frame Card Fill",
+                    argb = spec.frameFillColor,
+                    onClick = {
+                        colorDialog = Triple("Frame Card Fill", spec.frameFillColor) { c ->
+                            onSpecChange(spec.copy(frameFillColor = c))
+                        }
+                    }
+                )
+                Spacer(Modifier.height(8.dp))
+                ColorSwatchRow(
+                    label = "Caption / Border Accent",
+                    argb = spec.frameAccentColor,
+                    onClick = {
+                        colorDialog = Triple("Frame Accent Color", spec.frameAccentColor) { c ->
+                            onSpecChange(spec.copy(frameAccentColor = c))
+                        }
+                    }
+                )
+                Spacer(Modifier.height(8.dp))
+                LabeledSlider(
+                    label = "Frame Corner Radius",
+                    valueText = "${spec.cornerRadiusDp.roundToInt()} dp",
+                    value = spec.cornerRadiusDp,
+                    valueRange = 8f..36f,
+                    onValueChange = { onSpecChange(spec.copy(cornerRadiusDp = it)) }
+                )
+            }
+        }
+
+        QraftSectionCard(contentPadding = PaddingValues(14.dp)) {
+            SectionLabel("Raster Export Width (Up to 8K)")
+            Spacer(Modifier.height(8.dp))
+            QraftResolutionSelector(
+                selectedPx = spec.exportWidthPx,
+                onSelect = { px -> onSpecChange(spec.copy(exportWidthPx = px)) }
+            )
+        }
+    }
+
+    colorDialog?.let { (title, initial, onPicked) ->
+        ColorPickerModalSheet(
+            title = title,
+            initialArgb = initial,
+            onDismiss = { colorDialog = null },
+            onColorSelected = onPicked
+        )
     }
 }

@@ -58,67 +58,67 @@ data class QraftColors(
 
 private val LightQraftColors = QraftColors(
     isDark = false,
-    background = Color(0xFFFAF7F4),
+    background = Color(0xFFFAFAFA),
     surface = Color(0xFFFFFFFF),
-    surfaceMuted = Color(0xFFF2ECE6),
-    cardBorder = Color(0xFFEFE8E1),
-    textPrimary = Color(0xFF1E1D1B),
-    textSecondary = Color(0xFF7B736C),
-    textTertiary = Color(0xFFA79E96),
-    activePillBg = Color(0xFF232220),
+    surfaceMuted = Color(0xFFF1F1F4),
+    cardBorder = Color(0xFFE6E6EA),
+    textPrimary = Color(0xFF111113),
+    textSecondary = Color(0xFF686870),
+    textTertiary = Color(0xFF9C9CA4),
+    activePillBg = Color(0xFF111113),
     activePillContent = Color(0xFFFFFFFF),
-    espressoAccent = Color(0xFF5C2E0B),
+    espressoAccent = Color(0xFF111113),
     espressoAccentContent = Color(0xFFFFFFFF),
-    heroBannerBg = Color(0xFFFCD8BE),
-    heroBannerTitle = Color(0xFF23170F),
-    heroBannerBody = Color(0xFF6A4D3B),
-    timelineDotActive = Color(0xFFF07C2E),
-    timelineLine = Color(0xFFDCD3CB),
-    successBg = Color(0xFFE4F0C8),
-    successFg = Color(0xFF4F7616),
-    warningBg = Color(0xFFFFEAD4),
-    warningFg = Color(0xFFB55011),
-    dangerBg = Color(0xFFFCE0DE),
-    dangerFg = Color(0xFFC43B33),
+    heroBannerBg = Color(0xFFF0F0F4),
+    heroBannerTitle = Color(0xFF111113),
+    heroBannerBody = Color(0xFF5A5A62),
+    timelineDotActive = Color(0xFF111113),
+    timelineLine = Color(0xFFDCDCE2),
+    successBg = Color(0xFFE7F5EC),
+    successFg = Color(0xFF1B7A43),
+    warningBg = Color(0xFFFFF4E5),
+    warningFg = Color(0xFFB45309),
+    dangerBg = Color(0xFFFDECEC),
+    dangerFg = Color(0xFFB91C1C),
     pastels = listOf(
-        PastelPair(Color(0xFFFCE3D2), Color(0xFFE76F25)), // Peach
-        PastelPair(Color(0xFFE4F0C8), Color(0xFF6E9725)), // Sage
-        PastelPair(Color(0xFFF5DCF1), Color(0xFFBC59AF)), // Orchid
-        PastelPair(Color(0xFFFBE7D3), Color(0xFFD67B35)), // Sand
-        PastelPair(Color(0xFFDCEEFF), Color(0xFF3E83C4))  // Sky
+        PastelPair(Color(0xFF18181B), Color(0xFFFFFFFF)),
+        PastelPair(Color(0xFFF1F1F5), Color(0xFF18181B)),
+        PastelPair(Color(0xFFE4E4EA), Color(0xFF111113)),
+        PastelPair(Color(0xFF27272A), Color(0xFFF4F4F5)),
+        PastelPair(Color(0xFFEBEBF0), Color(0xFF27272A))
     )
 )
 
 private val DarkQraftColors = QraftColors(
     isDark = true,
-    background = Color(0xFF12100E),
-    surface = Color(0xFF1E1B18),
-    surfaceMuted = Color(0xFF2B2622),
-    cardBorder = Color(0xFF322C27),
-    textPrimary = Color(0xFFF5EFEA),
-    textSecondary = Color(0xFFA79E95),
-    textTertiary = Color(0xFF756C65),
-    activePillBg = Color(0xFFF5EFEA),
-    activePillContent = Color(0xFF181512),
-    espressoAccent = Color(0xFFD87A38),
-    espressoAccentContent = Color(0xFFFFFFFF),
-    heroBannerBg = Color(0xFF312117),
-    heroBannerTitle = Color(0xFFFCE6D4),
-    heroBannerBody = Color(0xFFCBB19D),
-    timelineDotActive = Color(0xFFF28E49),
-    timelineLine = Color(0xFF3D3630),
-    successBg = Color(0xFF232F19),
-    successFg = Color(0xFF9AC74D),
-    warningBg = Color(0xFF3B2413),
-    warningFg = Color(0xFFF39C59),
-    dangerBg = Color(0xFF3D1E1C),
-    dangerFg = Color(0xFFF07B73),
+    background = Color(0xFF0A0A0B),
+    surface = Color(0xFF151518),
+    surfaceMuted = Color(0xFF202024),
+    cardBorder = Color(0xFF2B2B31),
+    textPrimary = Color(0xFFF8F8FA),
+    textSecondary = Color(0xFFA1A1AA),
+    textTertiary = Color(0xFF6B6B74),
+    activePillBg = Color(0xFFF8F8FA),
+    activePillContent = Color(0xFF0A0A0B),
+    espressoAccent = Color(0xFFF8F8FA),
+    espressoAccentContent = Color(0xFF0A0A0B),
+    heroBannerBg = Color(0xFF17171B),
+    heroBannerTitle = Color(0xFFFFFFFF),
+    heroBannerBody = Color(0xFFA8A8B2),
+    timelineDotActive = Color(0xFFF8F8FA),
+    timelineLine = Color(0xFF2D2D34),
+    successBg = Color(0xFF15291D),
+    successFg = Color(0xFF6EE7A0),
+    warningBg = Color(0xFF2F2312),
+    warningFg = Color(0xFFFBBF24),
+    dangerBg = Color(0xFF331819),
+    dangerFg = Color(0xFFF87171),
     pastels = listOf(
-        PastelPair(Color(0xFF372419), Color(0xFFF29352)),
-        PastelPair(Color(0xFF232F19), Color(0xFF9AC74D)),
-        PastelPair(Color(0xFF342031), Color(0xFFDE84D1)),
-        PastelPair(Color(0xFF36281A), Color(0xFFEA9C57)),
-        PastelPair(Color(0xFF1D2B38), Color(0xFF6FB1ED))
+        PastelPair(Color(0xFFF4F4F5), Color(0xFF111113)),
+        PastelPair(Color(0xFF242429), Color(0xFFF4F4F5)),
+        PastelPair(Color(0xFF2C2C33), Color(0xFFE4E4E7)),
+        PastelPair(Color(0xFFE4E4E7), Color(0xFF18181B)),
+        PastelPair(Color(0xFF1D1D22), Color(0xFFD4D4D8))
     )
 )
 
@@ -219,9 +219,12 @@ fun QraftTheme(
         activePillBg = animateThemeColor(raw.activePillBg),
         activePillContent = animateThemeColor(raw.activePillContent),
         espressoAccent = animateThemeColor(raw.espressoAccent),
+        espressoAccentContent = animateThemeColor(raw.espressoAccentContent),
         heroBannerBg = animateThemeColor(raw.heroBannerBg),
         heroBannerTitle = animateThemeColor(raw.heroBannerTitle),
-        heroBannerBody = animateThemeColor(raw.heroBannerBody)
+        heroBannerBody = animateThemeColor(raw.heroBannerBody),
+        timelineDotActive = animateThemeColor(raw.timelineDotActive),
+        timelineLine = animateThemeColor(raw.timelineLine)
     )
 
     val m3Scheme = if (useDark) {

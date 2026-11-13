@@ -2,6 +2,49 @@ package com.hkm.qraft.model
 
 import java.util.UUID
 
+enum class CodeKind(val label: String) {
+    QR("QR Code"),
+    BARCODE("Barcode")
+}
+
+enum class BarcodeFormatType(
+    val label: String,
+    val shortCode: String,
+    val zxingName: String,
+    val is2D: Boolean,
+    val helperText: String,
+    val defaultSample: String
+) {
+    CODE_128("Code 128", "C128", "CODE_128", false, "Any ASCII text or SKU identifier", "QRAFT-PRO-2026"),
+    EAN_13("EAN-13", "EAN13", "EAN_13", false, "12 digits (auto checksum) or 13 digits", "893456312014"),
+    EAN_8("EAN-8", "EAN8", "EAN_8", false, "7 digits (auto checksum) or 8 digits", "9638507"),
+    UPC_A("UPC-A", "UPCA", "UPC_A", false, "11 digits (auto checksum) or 12 digits", "03600029145"),
+    CODE_39("Code 39", "C39", "CODE_39", false, "Uppercase A-Z, 0-9, - . $ / + % space", "QRAFT-05"),
+    ITF("ITF-14", "ITF", "ITF", false, "Even count of digits (e.g. 14 digits)", "12345678901231"),
+    CODABAR("Codabar", "CDBR", "CODABAR", false, "Digits 0-9 with A-D start/stop", "A40156B"),
+    PDF_417("PDF417", "PDF417", "PDF_417", true, "High-density 2D stacked transit/ID code", "QRAFT STUDIO PASS 2026"),
+    AZTEC("Aztec", "AZTEC", "AZTEC", true, "Compact 2D square boarding pass matrix", "https://qraft.studio/ticket"),
+    DATA_MATRIX("Data Matrix", "DM", "DATA_MATRIX", true, "Compact industrial & logistics 2D grid", "SN-2026-QRAFT-8K")
+}
+
+data class BarcodeDesignSpec(
+    val format: BarcodeFormatType = BarcodeFormatType.CODE_128,
+    val data: String = "QRAFT-PRO-2026",
+    val foregroundColor: Long = 0xFF111113,
+    val backgroundColor: Long = 0xFFFFFFFF,
+    val transparentBg: Boolean = false,
+    val roundedBars: Boolean = false,
+    val showText: Boolean = true,
+    val caption: String = "",
+    val quietMarginFraction: Float = 0.08f,
+    val framed: Boolean = false,
+    val frameFillColor: Long = 0xFFFFFFFF,
+    val frameAccentColor: Long = 0xFF111113,
+    val frameTextColor: Long = 0xFFFFFFFF,
+    val cornerRadiusDp: Float = 24f,
+    val exportWidthPx: Int = 4096
+)
+
 enum class QrContentType(
     val title: String,
     val shortCode: String,
@@ -114,7 +157,11 @@ enum class QrPixelStyle(val label: String) {
     CROSS("Plus"),
     HEART("Heart"),
     HEXAGON("Hexagon"),
-    SHIELD("Soft Shield")
+    SHIELD("Shield"),
+    OCTAGON("Octagon"),
+    RING("Ring"),
+    WAVE_H("Pill H"),
+    WAVE_V("Pill V")
 }
 
 enum class QrLightPixelStyle(val label: String) {
@@ -127,12 +174,15 @@ enum class QrLightPixelStyle(val label: String) {
 enum class QrEyeFrameStyle(val label: String) {
     SQUARE("Sharp"),
     ROUNDED("Rounded"),
-    CIRCLE("Ring"),
+    CIRCLE("Circle"),
     LEAF_TL_BR("Leaf A"),
     LEAF_TR_BL("Leaf B"),
     CHAMFER("Chamfer"),
     SQUIRCLE("Squircle"),
-    THREE_ROUND("Drop")
+    THREE_ROUND("Drop"),
+    DOUBLE_RING("Dual Ring"),
+    BRACKET("Bracket"),
+    HEXAGON("Hex Ring")
 }
 
 enum class QrEyeBallStyle(val label: String) {
@@ -143,13 +193,15 @@ enum class QrEyeBallStyle(val label: String) {
     LEAF("Leaf"),
     STAR("Star"),
     SQUIRCLE("Squircle"),
-    CROSS("Cross")
+    CROSS("Cross"),
+    OCTAGON("Octagon"),
+    HEXAGON("Hexagon")
 }
 
 enum class QrCodeSilhouette(val label: String) {
-    SQUARE("Classic Square"),
-    CIRCLE("Circular Badge"),
-    HEXAGON("Hexagon Emblem")
+    SQUARE("Square"),
+    CIRCLE("Circular"),
+    HEXAGON("Hexagon")
 }
 
 enum class BrushMode(val label: String) {
@@ -169,8 +221,8 @@ enum class GradientDirection(val label: String, val angleDeg: Float) {
 
 data class BrushStyleConfig(
     val mode: BrushMode = BrushMode.SOLID,
-    val primaryColor: Long = 0xFF1E1D1B,
-    val secondaryColor: Long = 0xFFE86F28,
+    val primaryColor: Long = 0xFF111113,
+    val secondaryColor: Long = 0xFF52525B,
     val tertiaryColor: Long? = null,
     val direction: GradientDirection = GradientDirection.TOP_LEFT_TO_BOTTOM_RIGHT,
     val angleDegrees: Float = 45f
@@ -188,7 +240,7 @@ data class BackgroundStyleConfig(
     val brush: BrushStyleConfig = BrushStyleConfig(
         mode = BrushMode.SOLID,
         primaryColor = 0xFFFFFFFF,
-        secondaryColor = 0xFFFFEFE3
+        secondaryColor = 0xFFF4F4F6
     ),
     val photoUri: String? = null,
     val photoOverlayAlpha: Float = 0.72f,
@@ -221,9 +273,9 @@ data class LogoStyleConfig(
     val sourceType: LogoSourceType = LogoSourceType.NONE,
     val galleryUri: String? = null,
     val iconKey: String = "qr",
-    val emoji: String = "⚡",
+    val emoji: String = "✦",
     val monogramText: String = "QR",
-    val monogramBgColor: Long = 0xFF5C2E0B,
+    val monogramBgColor: Long = 0xFF111113,
     val monogramTextColor: Long = 0xFFFFFFFF,
     val sizeFraction: Float = 0.22f,
     val clipShape: LogoClipShape = LogoClipShape.CIRCLE,
@@ -232,35 +284,48 @@ data class LogoStyleConfig(
     val backingEnabled: Boolean = true,
     val backingColor: Long = 0xFFFFFFFF,
     val borderEnabled: Boolean = true,
-    val borderColor: Long = 0xFFF0EBE6,
-    val iconTintColor: Long = 0xFF5C2E0B
-)
+    val borderColor: Long = 0xFFE4E4EA,
+    val iconTintColor: Long = 0xFF111113,
+    val rotationDeg: Float? = null,
+    val borderWidthFraction: Float? = null
+) {
+    fun effectiveRotationDeg(): Float = rotationDeg ?: 0f
+    fun effectiveBorderWidthFraction(): Float = (borderWidthFraction ?: 0.045f).coerceIn(0.015f, 0.12f)
+}
 
 enum class OuterFrameStyle(val label: String) {
     NONE("No Frame"),
-    CLEAN_CARD("Apple Card"),
+    CLEAN_CARD("Clean Card"),
+    MINIMAL_OUTLINE("Hairline"),
     BOTTOM_SCAN_BANNER("Scan Banner"),
     TOP_BADGE_CARD("Top Tag"),
+    SCAN_BAR_HEADER("Header Bar"),
     SPEECH_BUBBLE("Callout"),
     GRADIENT_BORDER("Gradient Ring"),
     POLAROID_STAMP("Polaroid"),
     DOUBLE_PILL("Twin Pill"),
     WARM_POSTER("Poster"),
     GLASS_CARD("Glass Card"),
-    CORNER_BRACKET("Viewfinder")
+    CORNER_BRACKET("Viewfinder"),
+    TICKET_STUB("Ticket Stub"),
+    NEON_GLOW("Dark Glow"),
+    CIRCULAR_STAMP("Circle Seal")
 }
 
 data class OuterFrameConfig(
-    val style: OuterFrameStyle = OuterFrameStyle.CLEAN_CARD,
+    val style: OuterFrameStyle = OuterFrameStyle.NONE,
     val label: String = "SCAN ME",
     val subtitle: String = "",
     val frameFillColor: Long = 0xFFFFFFFF,
-    val accentColor: Long = 0xFF5C2E0B,
-    val accentSecondaryColor: Long = 0xFFF07C2E,
+    val accentColor: Long = 0xFF111113,
+    val accentSecondaryColor: Long = 0xFF52525B,
     val textColor: Long = 0xFFFFFFFF,
     val cornerRadiusDp: Float = 26f,
-    val borderThicknessDp: Float = 0f
-)
+    val borderThicknessDp: Float = 0f,
+    val framePaddingFraction: Float? = null
+) {
+    fun effectivePaddingFraction(): Float = (framePaddingFraction ?: 0.085f).coerceIn(0.04f, 0.16f)
+}
 
 enum class QrEccSetting(val label: String, val code: String, val ratioText: String) {
     AUTO("Auto", "AUTO", "Smart"),
@@ -284,20 +349,20 @@ data class QrDesignSpec(
     val fourthEyeEnabled: Boolean = false,
     val darkBrush: BrushStyleConfig = BrushStyleConfig(
         mode = BrushMode.SOLID,
-        primaryColor = 0xFF1E1D1B,
-        secondaryColor = 0xFFE86F28
+        primaryColor = 0xFF111113,
+        secondaryColor = 0xFF52525B
     ),
     val customEyeFrameColors: Boolean = false,
     val eyeFrameBrush: BrushStyleConfig = BrushStyleConfig(
         mode = BrushMode.SOLID,
-        primaryColor = 0xFF5C2E0B,
-        secondaryColor = 0xFFF07C2E
+        primaryColor = 0xFF111113,
+        secondaryColor = 0xFF52525B
     ),
     val customEyeBallColors: Boolean = false,
     val eyeBallBrush: BrushStyleConfig = BrushStyleConfig(
         mode = BrushMode.SOLID,
-        primaryColor = 0xFFF07C2E,
-        secondaryColor = 0xFF5C2E0B
+        primaryColor = 0xFF111113,
+        secondaryColor = 0xFF52525B
     ),
     val background: BackgroundStyleConfig = BackgroundStyleConfig(),
     val logo: LogoStyleConfig = LogoStyleConfig(),
@@ -317,16 +382,33 @@ data class QrCreationItem(
     val isFavorite: Boolean = false,
     val isVerifiedScannable: Boolean = true,
     val createdAtMillis: Long = System.currentTimeMillis(),
-    val updatedAtMillis: Long = System.currentTimeMillis()
-)
+    val updatedAtMillis: Long = System.currentTimeMillis(),
+    val codeKind: CodeKind? = null,
+    val barcode: BarcodeDesignSpec? = null
+) {
+    fun resolvedCodeKind(): CodeKind = codeKind ?: CodeKind.QR
+    fun resolvedBarcode(): BarcodeDesignSpec = barcode ?: BarcodeDesignSpec()
+}
+
+enum class PresetCategory(val label: String) {
+    ALL("All"),
+    MONOCHROME("Monochrome"),
+    GRADIENT("Gradient"),
+    DARK("Dark & Neon"),
+    FRAMED("Framed Cards"),
+    ORGANIC("Geometric & Fluid")
+}
 
 data class SavedStylePreset(
     val id: String,
     val name: String,
     val subtitle: String,
     val design: QrDesignSpec,
-    val isBuiltIn: Boolean = true
-)
+    val isBuiltIn: Boolean = true,
+    val category: PresetCategory? = null
+) {
+    fun resolvedCategory(): PresetCategory = category ?: PresetCategory.MONOCHROME
+}
 
 enum class ThemeMode(val label: String) {
     SYSTEM("System"),

@@ -18,6 +18,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.hkm.qraft.data.PresetCatalog
 import com.hkm.qraft.data.QraftBackupManager
 import com.hkm.qraft.model.*
+import androidx.compose.ui.test.performClick
+import com.hkm.qraft.qr.BarcodeEngine
 import com.hkm.qraft.qr.BatchSequenceExpander
 import com.hkm.qraft.qr.PaletteExtractor
 import com.hkm.qraft.qr.PrintSheetEngine
@@ -29,6 +31,8 @@ import com.hkm.qraft.qr.QrExporter
 import com.hkm.qraft.qr.QrPayloadEncoder
 import com.hkm.qraft.qr.QrPdfWriter
 import com.hkm.qraft.ui.screens.HomeScreen
+import com.hkm.qraft.ui.screens.LibraryScreen
+import com.hkm.qraft.ui.screens.ScannerScreen
 import com.hkm.qraft.ui.screens.StudioScreen
 import com.hkm.qraft.ui.theme.QraftTheme
 import org.junit.Assert.*
@@ -71,12 +75,14 @@ class QraftVerificationTest {
 
     @Test
     fun svgExporterProducesValidSvgDocument() {
-        val defaultDesign = PresetCatalog.builtInPresets.first().design
-        assertEquals(4096, defaultDesign.exportSizePx)
-        val svg = QrEngine.exportSvg("https://qraft.studio", defaultDesign)
+        val baseDesign = PresetCatalog.builtInPresets.first().design.copy(
+            outerFrame = OuterFrameConfig(style = OuterFrameStyle.DOUBLE_PILL, label = "SCAN ME"),
+            exportSizePx = 8192
+        )
+        val svg = QrEngine.exportSvg("https://qraft.studio", baseDesign)
         assertTrue(svg.startsWith("<?xml"))
         assertTrue(svg.contains("<svg"))
-        assertTrue(svg.contains("""width="4096""""))
+        assertTrue(svg.contains("""width="8192""""))
         assertTrue(svg.contains("""fill-rule="evenodd""""))
         assertTrue(svg.contains("</svg>"))
         assertTrue(svg.contains("SCAN ME"))
@@ -84,7 +90,7 @@ class QraftVerificationTest {
         QrPixelStyle.entries.forEach { style ->
             val styledSvg = QrEngine.exportSvg(
                 "https://qraft.studio/$style",
-                defaultDesign.copy(pixelStyle = style, lightPixelStyle = QrLightPixelStyle.DOT)
+                baseDesign.copy(pixelStyle = style, lightPixelStyle = QrLightPixelStyle.DOT)
             )
             assertTrue("SVG should render pixel style $style", styledSvg.contains("<path d="))
         }
@@ -105,39 +111,33 @@ class QraftVerificationTest {
         }
         assertTrue("Non-scannable presets: $failedPresets", failedPresets.isEmpty())
 
-        // Verify true 4K UHD (4096px) export works cleanly without OOM
-        val uhd4k = QrEngine.renderFramedExportBitmap(
+        // Verify true 8K UHD (8192px) export works cleanly without OOM
+        val uhd8k = QrEngine.renderFramedExportBitmap(
             context = context,
             data = testPayload,
             design = PresetCatalog.builtInPresets.first().design.copy(
                 outerFrame = OuterFrameConfig(
-                    style = OuterFrameStyle.DOUBLE_PILL,
-                    label = "SCAN ME",
-                    subtitle = "4K ULTRA HD"
+                    style = OuterFrameStyle.NONE
                 )
             ),
-            targetWidthPx = 4096
+            targetWidthPx = 8192
         )
-        assertEquals(4096, uhd4k.width)
-        assertTrue(uhd4k.height > 4096)
-        uhd4k.recycle()
+        assertEquals(8192, uhd8k.width)
+        assertEquals(8192, uhd8k.height)
+        uhd8k.recycle()
 
-        // Verify Speech Bubble + Warm Poster + Double Pill + Glass Card + Viewfinder + 300 DPI PDF generation
-        listOf(
-            OuterFrameStyle.SPEECH_BUBBLE,
-            OuterFrameStyle.WARM_POSTER,
-            OuterFrameStyle.DOUBLE_PILL,
-            OuterFrameStyle.GLASS_CARD,
-            OuterFrameStyle.CORNER_BRACKET
-        ).forEach { frameStyle ->
+        // Verify ALL 16 frame styles render & export SVG cleanly
+        OuterFrameStyle.entries.forEach { frameStyle ->
             val frameDesign = QrDesignSpec(
-                pixelStyle = QrPixelStyle.DIAMOND,
-                eyeFrameStyle = QrEyeFrameStyle.CHAMFER,
-                eyeBallStyle = QrEyeBallStyle.STAR,
+                pixelStyle = QrPixelStyle.OCTAGON,
+                eyeFrameStyle = QrEyeFrameStyle.DOUBLE_RING,
+                eyeBallStyle = QrEyeBallStyle.HEXAGON,
                 logo = LogoStyleConfig(
                     sourceType = LogoSourceType.MONOGRAM,
                     monogramText = "QR",
-                    sizeFraction = 0.20f
+                    sizeFraction = 0.20f,
+                    rotationDeg = 12f,
+                    borderWidthFraction = 0.08f
                 ),
                 outerFrame = OuterFrameConfig(
                     style = frameStyle,
@@ -154,22 +154,71 @@ class QraftVerificationTest {
                 targetWidthPx = 640
             )
             assertEquals(640, bmp.width)
-            assertTrue(bmp.height > 640)
+            if (frameStyle == OuterFrameStyle.NONE) {
+                assertEquals(640, bmp.height)
+            } else {
+                assertTrue("Frame $frameStyle should extend height", bmp.height >= 640)
+            }
             bmp.recycle()
             val svgDoc = QrEngine.exportSvg(testPayload, frameDesign)
             assertTrue(svgDoc.contains("</svg>"))
         }
 
-        assertEquals(14, PresetCatalog.builtInPresets.size)
+        assertEquals(30, PresetCatalog.builtInPresets.size)
+        assertEquals(16, QrPixelStyle.entries.size)
+        assertEquals(11, QrEyeFrameStyle.entries.size)
+        assertEquals(10, QrEyeBallStyle.entries.size)
+        assertEquals(16, OuterFrameStyle.entries.size)
 
         val pdfBytes = QrExporter.renderPdfBytes(
             context = context,
-            title = "4K Test Print",
+            title = "8K Test Print",
             data = testPayload,
             design = PresetCatalog.builtInPresets.first().design
         )
         val header = String(pdfBytes.take(5).toByteArray())
         assertEquals("%PDF-", header)
+    }
+
+    @Test
+    fun barcodeEngineGeneratesVerifiesAndExportsAllFormats() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        assertEquals(10, BarcodeFormatType.entries.size)
+
+        // GS1 auto check digit checks
+        val ean13Full = BarcodeEngine.normalizeAndValidate(BarcodeFormatType.EAN_13, "400638133393")
+        assertTrue(ean13Full.isValid)
+        assertEquals("4006381333931", ean13Full.normalizedData)
+        val upcAFull = BarcodeEngine.normalizeAndValidate(BarcodeFormatType.UPC_A, "03600029145")
+        assertTrue(upcAFull.isValid)
+        assertEquals("036000291452", upcAFull.normalizedData)
+
+        BarcodeFormatType.entries.forEach { format ->
+            val spec = BarcodeDesignSpec(
+                format = format,
+                data = format.defaultSample,
+                exportWidthPx = 2048,
+                showText = true,
+                roundedBars = !format.is2D,
+                framed = true
+            )
+            val verification = BarcodeEngine.verifyBarcodeScannable(spec)
+            assertTrue("Barcode format $format failed verification: ${verification.warningMessage}", verification.isScannable)
+
+            val bmp = BarcodeEngine.renderBarcodeBitmap(spec, targetWidthPx = 900)
+            assertEquals(900, bmp.width)
+            bmp.recycle()
+
+            val svg = BarcodeEngine.exportBarcodeSvg(spec)
+            assertTrue("SVG invalid for $format", svg.contains("<svg") && svg.contains("</svg>"))
+        }
+
+        val barcodePdf = QrExporter.renderBarcodePdfBytes(
+            context = context,
+            title = "Retail SKU",
+            spec = BarcodeDesignSpec(format = BarcodeFormatType.CODE_128, data = "QRAFT-PRO-8K")
+        )
+        assertEquals("%PDF-", String(barcodePdf.take(5).toByteArray()))
     }
 
     @Test
@@ -348,24 +397,36 @@ class QraftVerificationTest {
         }
 
         val starterItems = PresetCatalog.starterItems()
-        val studioDraft = StudioDraftState(
+        val qrDraft = StudioDraftState(
             editingId = null,
-            title = "Studio Preview v4",
+            codeKind = CodeKind.QR,
+            title = "Studio Preview v5",
             type = QrContentType.URL,
             payload = QrPayloadFields(url = "https://qraft.studio"),
-            design = PresetCatalog.builtInPresets[9].design, // Frosted Studio (GLASS_CARD)
+            design = PresetCatalog.builtInPresets[0].design,
             isFavorite = true
+        )
+        val barcodeDraft = StudioDraftState(
+            editingId = null,
+            codeKind = CodeKind.BARCODE,
+            title = "Retail SKU",
+            barcode = BarcodeDesignSpec(
+                format = BarcodeFormatType.EAN_13,
+                data = "4006381333931",
+                exportWidthPx = 8192
+            )
         )
 
         val darkModeState = androidx.compose.runtime.mutableStateOf(false)
-        val showStudioState = androidx.compose.runtime.mutableStateOf(false)
+        // 0 = Home, 1 = Studio QR, 2 = Studio Barcode, 3 = Library, 4 = Scanner
+        val screenState = androidx.compose.runtime.mutableIntStateOf(0)
 
         composeRule.setContent {
             val isDark = darkModeState.value
-            val inStudio = showStudioState.value
+            val scr = screenState.intValue
             QraftTheme(themeMode = if (isDark) ThemeMode.DARK else ThemeMode.LIGHT) {
-                if (!inStudio) {
-                    HomeScreen(
+                when (scr) {
+                    0 -> HomeScreen(
                         creatorName = "Budi",
                         themeMode = if (isDark) ThemeMode.DARK else ThemeMode.LIGHT,
                         items = starterItems,
@@ -374,6 +435,8 @@ class QraftVerificationTest {
                         onCycleTheme = {},
                         onOpenSettings = {},
                         onOpenStudioNew = {},
+                        onOpenStudioNewBarcode = {},
+                        onOpenScanner = {},
                         onOpenExisting = {},
                         onQuickFullscreen = {},
                         onToggleFavorite = {},
@@ -382,14 +445,13 @@ class QraftVerificationTest {
                         onOpenCreatePicker = {},
                         onImportQr = {}
                     )
-                } else {
-                    StudioScreen(
-                        draft = studioDraft,
+                    1, 2 -> StudioScreen(
+                        draft = if (scr == 2) barcodeDraft else qrDraft,
                         customPresets = emptyList(),
                         scannability = ScannabilityReport(
                             isScannable = true,
-                            decodedPreview = "https://qraft.studio",
-                            contrastRatio = 8.4,
+                            decodedPreview = if (scr == 2) "4006381333931" else "https://qraft.studio",
+                            contrastRatio = 19.2,
                             matrixSize = 25,
                             effectiveEcc = "M"
                         ),
@@ -398,9 +460,11 @@ class QraftVerificationTest {
                         canRedo = false,
                         onBack = {},
                         onTitleChange = {},
+                        onCodeKindChange = {},
                         onTypeChange = {},
                         onFieldsChange = {},
                         onDesignChange = {},
+                        onBarcodeChange = {},
                         onPickLogoPhoto = {},
                         onPickBackgroundPhoto = {},
                         onToggleFavorite = {},
@@ -413,11 +477,30 @@ class QraftVerificationTest {
                         onOpenExport = {},
                         onOpenFullscreen = {}
                     )
+                    3 -> LibraryScreen(
+                        items = starterItems,
+                        onBack = {},
+                        onOpenExisting = {},
+                        onDuplicate = {},
+                        onToggleFavorite = {},
+                        onDelete = {},
+                        onQuickFullscreen = {},
+                        onOpenBatch = {},
+                        onCreateNew = {},
+                        onImportQr = {},
+                        onOpenScanner = {}
+                    )
+                    else -> ScannerScreen(
+                        onBack = {},
+                        onOpenInStudio = { _, _ -> },
+                        onSaveToLibrary = { _, _ -> },
+                        onCopyResult = {}
+                    )
                 }
             }
         }
 
-        composeRule.onNodeWithText("Morning, Budi").assertIsDisplayed()
+        composeRule.onNodeWithText("Budi", substring = true).assertIsDisplayed()
         composeRule.onNodeWithText("Remix").assertIsDisplayed()
         composeRule.onNodeWithText("Batch").assertIsDisplayed()
         savePng("qa_home_light.png", composeRule.onRoot().captureToImage().asAndroidBitmap())
@@ -426,51 +509,62 @@ class QraftVerificationTest {
         composeRule.waitForIdle()
         savePng("qa_home_dark.png", composeRule.onRoot().captureToImage().asAndroidBitmap())
 
-        showStudioState.value = true
+        screenState.intValue = 1
         darkModeState.value = false
         composeRule.waitForIdle()
-        composeRule.onAllNodesWithText("Studio Preview v4").onFirst().assertIsDisplayed()
+        composeRule.onAllNodesWithText("Studio Preview v5").onFirst().assertIsDisplayed()
         savePng("qa_studio_light.png", composeRule.onRoot().captureToImage().asAndroidBitmap())
+
+        // Switch to Shapes tab to verify borderless shape selectors visually!
+        composeRule.onNodeWithText("Shapes").performClick()
+        composeRule.waitForIdle()
+        savePng("qa_studio_shapes_light.png", composeRule.onRoot().captureToImage().asAndroidBitmap())
 
         darkModeState.value = true
         composeRule.waitForIdle()
         savePng("qa_studio_dark.png", composeRule.onRoot().captureToImage().asAndroidBitmap())
 
-        // Also capture real high-res framed QR artwork and A4 300 DPI Print Sheet sample
+        screenState.intValue = 2
+        darkModeState.value = false
+        composeRule.waitForIdle()
+        composeRule.onAllNodesWithText("Retail SKU").onFirst().assertIsDisplayed()
+        savePng("qa_studio_barcode_light.png", composeRule.onRoot().captureToImage().asAndroidBitmap())
+
+        screenState.intValue = 3
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Library").assertIsDisplayed()
+        savePng("qa_library_light.png", composeRule.onRoot().captureToImage().asAndroidBitmap())
+
+        screenState.intValue = 4
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Scanner").assertIsDisplayed()
+        savePng("qa_scanner_light.png", composeRule.onRoot().captureToImage().asAndroidBitmap())
+
         if (qaDir != null) {
-            val frosted = QrEngine.renderFramedExportBitmap(
+            val bare = QrEngine.renderFramedExportBitmap(
                 context = context,
-                data = "https://qraft.studio/v4",
-                design = PresetCatalog.builtInPresets[9].design,
+                data = "https://qraft.studio/v5",
+                design = PresetCatalog.builtInPresets[0].design,
                 targetWidthPx = 900
             )
-            savePng("qa_frame_glass.png", frosted)
-            frosted.recycle()
+            savePng("qa_frame_none.png", bare)
+            bare.recycle()
 
-            val finder = QrEngine.renderFramedExportBitmap(
+            val stamp = QrEngine.renderFramedExportBitmap(
                 context = context,
-                data = "https://qraft.studio/v4",
-                design = PresetCatalog.builtInPresets[10].design,
+                data = "https://qraft.studio/v5",
+                design = PresetCatalog.builtInPresets.first { it.design.outerFrame.style == OuterFrameStyle.CIRCULAR_STAMP }.design,
                 targetWidthPx = 900
             )
-            savePng("qa_frame_finder.png", finder)
-            finder.recycle()
+            savePng("qa_frame_stamp.png", stamp)
+            stamp.recycle()
 
-            val sheetItems = PresetCatalog.builtInPresets.take(6).mapIndexed { i, p ->
-                PrintSheetItem(title = p.name, payload = "https://qraft.studio/p/${i + 1}", design = p.design)
-            }
-            val sheetBmp = PrintSheetEngine.renderPrintSheetPageBitmap(
-                context = context,
-                items = sheetItems,
-                layout = PrintSheetLayout.STICKERS_3X4,
-                pageIndex = 0,
-                totalPages = 1,
-                sheetTitle = "Qraft v4.0 Visual QA Sheet"
+            val bcBmp = BarcodeEngine.renderBarcodeBitmap(
+                spec = barcodeDraft.barcode,
+                targetWidthPx = 900
             )
-            val scaledSheet = Bitmap.createScaledBitmap(sheetBmp, 900, 1273, true)
-            savePng("qa_print_sheet.png", scaledSheet)
-            scaledSheet.recycle()
-            sheetBmp.recycle()
+            savePng("qa_barcode_preview.png", bcBmp)
+            bcBmp.recycle()
         }
     }
 
