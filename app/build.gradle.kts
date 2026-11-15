@@ -34,8 +34,8 @@ android {
         applicationId = "com.hkm.qraft"
         minSdk = 24
         targetSdk = 36
-        versionCode = 6
-        versionName = "6.0.0"
+        versionCode = 7
+        versionName = "7.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -109,6 +109,7 @@ dependencies {
     implementation(libs.androidx.camera.camera2)
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.view)
+    implementation(libs.haze)
 
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)

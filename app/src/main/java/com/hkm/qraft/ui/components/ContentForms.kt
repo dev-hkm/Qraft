@@ -1,9 +1,7 @@
 package com.hkm.qraft.ui.components
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -29,8 +27,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hkm.qraft.model.*
 import com.hkm.qraft.qr.QrPayloadEncoder
+import com.hkm.qraft.ui.theme.AppMotion
 import com.hkm.qraft.ui.theme.QraftThemeTokens
-import com.hkm.qraft.ui.theme.appleBounceClick
+import com.hkm.qraft.ui.theme.applePressable
+import com.hkm.qraft.ui.theme.rememberReduceMotion
 
 fun iconForContentType(type: QrContentType): ImageVector = when (type) {
     QrContentType.URL -> Icons.Rounded.Language
@@ -74,31 +74,42 @@ fun ContentEditorTab(
             ) {
                 QrContentType.entries.forEach { item ->
                     val selected = item == type
+                    val bg by animateColorAsState(
+                        targetValue = if (selected) colors.activePillBg else colors.surface,
+                        animationSpec = AppMotion.snappySpring(),
+                        label = "typeChipBg_${item.name}"
+                    )
+                    val fg by animateColorAsState(
+                        targetValue = if (selected) colors.activePillContent else colors.textPrimary,
+                        animationSpec = AppMotion.snappySpring(),
+                        label = "typeChipFg_${item.name}"
+                    )
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier
+                            .defaultMinSize(minHeight = 38.dp)
                             .clip(RoundedCornerShape(50))
-                            .background(if (selected) colors.activePillBg else colors.surface)
+                            .background(bg)
                             .border(
                                 1.dp,
-                                if (selected) colors.activePillBg else colors.cardBorder,
+                                if (selected) bg else colors.cardBorder,
                                 RoundedCornerShape(50)
                             )
-                            .appleBounceClick { onTypeChange(item) }
+                            .applePressable { onTypeChange(item) }
                             .padding(horizontal = 14.dp, vertical = 9.dp)
                     ) {
                         Icon(
                             imageVector = iconForContentType(item),
                             contentDescription = null,
-                            tint = if (selected) colors.activePillContent else colors.textPrimary,
+                            tint = fg,
                             modifier = Modifier.size(16.dp)
                         )
                         Text(
                             text = item.title,
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
-                            color = if (selected) colors.activePillContent else colors.textPrimary
+                            color = fg
                         )
                     }
                 }
@@ -115,9 +126,10 @@ fun ContentEditorTab(
         )
 
         // Dynamic content fields
+        val reduceMotion = rememberReduceMotion()
         AnimatedContent(
             targetState = type,
-            transitionSpec = { fadeIn().togetherWith(fadeOut()) },
+            transitionSpec = { AppMotion.sectionTransform(reduceMotion) },
             label = "typeForm"
         ) { activeType ->
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -584,16 +596,27 @@ fun SelectableChip(
     modifier: Modifier = Modifier
 ) {
     val colors = QraftThemeTokens.colors
+    val bg by animateColorAsState(
+        targetValue = if (selected) colors.activePillBg else colors.surface,
+        animationSpec = AppMotion.snappySpring(),
+        label = "chipBg"
+    )
+    val fg by animateColorAsState(
+        targetValue = if (selected) colors.activePillContent else colors.textPrimary,
+        animationSpec = AppMotion.snappySpring(),
+        label = "chipFg"
+    )
     Box(
         modifier = modifier
+            .defaultMinSize(minHeight = 36.dp)
             .clip(RoundedCornerShape(50))
-            .background(if (selected) colors.activePillBg else colors.surface)
+            .background(bg)
             .border(
                 1.dp,
-                if (selected) colors.activePillBg else colors.cardBorder,
+                if (selected) bg else colors.cardBorder,
                 RoundedCornerShape(50)
             )
-            .appleBounceClick { onClick() }
+            .applePressable { onClick() }
             .padding(horizontal = 14.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -601,7 +624,7 @@ fun SelectableChip(
             text = label,
             style = MaterialTheme.typography.labelMedium,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-            color = if (selected) colors.activePillContent else colors.textPrimary,
+            color = fg,
             maxLines = 1
         )
     }
@@ -612,10 +635,12 @@ private fun SmallAssistChip(label: String, onClick: () -> Unit) {
     val colors = QraftThemeTokens.colors
     Box(
         modifier = Modifier
+            .defaultMinSize(minHeight = 34.dp)
             .clip(RoundedCornerShape(50))
             .background(colors.surfaceMuted)
-            .appleBounceClick { onClick() }
-            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .applePressable { onClick() }
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center
     ) {
         Text(label, style = MaterialTheme.typography.labelSmall, color = colors.textSecondary)
     }
@@ -682,7 +707,7 @@ fun ToggleRow(
         border = androidx.compose.foundation.BorderStroke(1.dp, colors.cardBorder),
         modifier = Modifier
             .fillMaxWidth()
-            .appleBounceClick { onCheckedChange(!checked) }
+            .applePressable { onCheckedChange(!checked) }
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),

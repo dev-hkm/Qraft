@@ -1,13 +1,14 @@
 package com.hkm.qraft.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -18,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -31,13 +33,20 @@ import com.hkm.qraft.ui.components.QraftButtonVariant
 import com.hkm.qraft.ui.components.QraftHeaderCircleButton
 import com.hkm.qraft.ui.components.QraftModalSheet
 import com.hkm.qraft.ui.components.QraftPillButton
-import com.hkm.qraft.ui.components.QraftStatusBarScrim
 import com.hkm.qraft.ui.components.QraftTextField
 import com.hkm.qraft.ui.components.SelectableChip
 import com.hkm.qraft.ui.components.iconForContentType
+import com.hkm.qraft.ui.theme.AppMotion
+import com.hkm.qraft.ui.theme.AppleGlassSurface
+import com.hkm.qraft.ui.theme.AppleGlassVariant
+import com.hkm.qraft.ui.theme.AppleOdometerNumber
+import com.hkm.qraft.ui.theme.AppleProgressiveEdgeFrost
+import com.hkm.qraft.ui.theme.EdgeFrostDirection
 import com.hkm.qraft.ui.theme.QraftThemeTokens
-import com.hkm.qraft.ui.theme.appleBounceClick
-import androidx.compose.ui.graphics.vector.ImageVector
+import com.hkm.qraft.ui.theme.appleHazeSource
+import com.hkm.qraft.ui.theme.applePressable
+import com.hkm.qraft.ui.theme.heroSource
+import dev.chrisbanes.haze.rememberHazeState
 
 private enum class LibrarySort(val label: String) {
     UPDATED("Latest"),
@@ -68,6 +77,8 @@ fun LibraryScreen(
     onOrganizeItem: (String, String?, List<String>) -> Unit = { _, _, _ -> }
 ) {
     val colors = QraftThemeTokens.colors
+    val hazeState = rememberHazeState()
+    val listState = rememberLazyListState()
     var search by remember { mutableStateOf("") }
     var onlyFavorites by remember { mutableStateOf(false) }
     var onlyBarcodes by remember { mutableStateOf(false) }
@@ -133,19 +144,21 @@ fun LibraryScreen(
             .background(colors.background)
     ) {
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
+                .appleHazeSource(hazeState)
                 .navigationBarsPadding(),
             contentPadding = PaddingValues(
                 start = 16.dp,
                 end = 16.dp,
                 top = 8.dp,
-                bottom = if (selectionMode) 96.dp else 28.dp
+                bottom = if (selectionMode) 104.dp else 28.dp
             ),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Tonser edge-to-edge scrolling header
-            item {
+            // Edge-to-edge scrolling header with tabular odometer count
+            item(key = "lib_header") {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -161,7 +174,7 @@ fun LibraryScreen(
                         Row(
                             modifier = Modifier.weight(1f),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             QraftHeaderCircleButton(
                                 icon = Icons.Rounded.ArrowBackIosNew,
@@ -169,37 +182,49 @@ fun LibraryScreen(
                                 size = 40.dp,
                                 onClick = onBack
                             )
-                            Text(
-                                text = "Library",
-                                style = MaterialTheme.typography.headlineMedium,
-                                color = colors.textPrimary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                            Column {
+                                Text(
+                                    text = "Library",
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    color = colors.textPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                AppleOdometerNumber(
+                                    value = filtered.size,
+                                    suffix = " saved",
+                                    style = MaterialTheme.typography.labelSmall.copy(color = colors.textSecondary)
+                                )
+                            }
                         }
 
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             QraftHeaderCircleButton(
                                 icon = Icons.Rounded.QrCodeScanner,
                                 contentDescription = "Live Scanner",
                                 size = 40.dp,
-                                onClick = onOpenScanner
+                                onClick = onOpenScanner,
+                                modifier = Modifier.heroSource("hero_lib_scanner", cornerRadiusDp = 20f)
                             )
-                            FilledTonalButton(
-                                onClick = onOpenBatch,
-                                shape = RoundedCornerShape(50),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                                colors = ButtonDefaults.filledTonalButtonColors(
-                                    containerColor = colors.surfaceMuted,
-                                    contentColor = colors.textPrimary
-                                )
+                            Box(
+                                modifier = Modifier
+                                    .defaultMinSize(minHeight = 40.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(colors.surfaceMuted)
+                                    .applePressable { onOpenBatch() }
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Rounded.AutoAwesomeMotion, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(5.dp))
-                                Text("Batch", maxLines = 1)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    Icon(Icons.Rounded.AutoAwesomeMotion, contentDescription = null, modifier = Modifier.size(16.dp), tint = colors.textPrimary)
+                                    Text("Batch", style = MaterialTheme.typography.labelLarge, color = colors.textPrimary, maxLines = 1)
+                                }
                             }
                             QraftHeaderCircleButton(
                                 icon = Icons.Rounded.Add,
@@ -336,40 +361,59 @@ fun LibraryScreen(
             } else {
                 items(filtered, key = { it.id }) { item ->
                     val isSelected = item.id in selectedIds
-                    LibraryItemCard(
-                        item = item,
-                        selectionMode = selectionMode,
-                        selected = isSelected,
-                        onLongPress = {
-                            selectionMode = true
-                            selectedIds = selectedIds + item.id
-                        },
-                        onOpen = {
-                            if (selectionMode) {
-                                selectedIds = if (isSelected) selectedIds - item.id else selectedIds + item.id
-                            } else {
-                                onOpenExisting(item)
-                            }
-                        },
-                        onFullscreen = { onQuickFullscreen(item) },
-                        onToggleFavorite = { onToggleFavorite(item.id) },
-                        onMoreActions = { actionTargetItem = item }
-                    )
+                    Box(
+                        modifier = Modifier
+                            .animateItem(
+                                fadeInSpec = AppMotion.snappySpring(),
+                                placementSpec = AppMotion.layoutSpring()
+                            )
+                            .heroSource("hero_lib_${item.id}", cornerRadiusDp = 22f)
+                    ) {
+                        LibraryItemCard(
+                            item = item,
+                            selectionMode = selectionMode,
+                            selected = isSelected,
+                            onLongPress = {
+                                selectionMode = true
+                                selectedIds = selectedIds + item.id
+                            },
+                            onOpen = {
+                                if (selectionMode) {
+                                    selectedIds = if (isSelected) selectedIds - item.id else selectedIds + item.id
+                                } else {
+                                    onOpenExisting(item)
+                                }
+                            },
+                            onFullscreen = { onQuickFullscreen(item) },
+                            onToggleFavorite = { onToggleFavorite(item.id) },
+                            onMoreActions = { actionTargetItem = item }
+                        )
+                    }
                 }
             }
         }
 
-        if (selectionMode) {
-            Surface(
-                color = colors.surface,
-                shadowElevation = 10.dp,
-                border = BorderStroke(1.dp, colors.cardBorder),
-                modifier = Modifier.align(Alignment.BottomCenter)
+        AnimatedVisibility(
+            visible = selectionMode,
+            enter = AppMotion.floatingBarEnter,
+            exit = AppMotion.floatingBarExit,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+        ) {
+            AppleGlassSurface(
+                shape = RoundedCornerShape(24.dp),
+                cornerRadiusDp = 24.dp,
+                variant = AppleGlassVariant.Regular,
+                hazeState = hazeState,
+                enableRefraction = true,
+                elevation = 12.dp,
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .navigationBarsPadding()
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -432,7 +476,13 @@ fun LibraryScreen(
             }
         }
 
-        QraftStatusBarScrim(modifier = Modifier.align(Alignment.TopCenter))
+        AppleProgressiveEdgeFrost(
+            hazeState = hazeState,
+            direction = EdgeFrostDirection.Top,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .height(WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 18.dp)
+        ) {}
     }
 
     if (showDeleteConfirm) {
@@ -830,7 +880,7 @@ private fun LibrarySheetActionRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .appleBounceClick { onClick() }
+            .applePressable { onClick() }
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp)
@@ -845,7 +895,6 @@ private fun LibrarySheetActionRow(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun LibraryItemCard(
     item: QrCreationItem,
@@ -857,22 +906,27 @@ private fun LibraryItemCard(
     onToggleFavorite: () -> Unit,
     onMoreActions: () -> Unit
 ) {
-            val colors = QraftThemeTokens.colors
-            val pastel = colors.pastelAt(item.type.pastelIndex)
-            val isBarcode = item.resolvedCodeKind() == CodeKind.BARCODE
-            val bc = if (isBarcode) item.resolvedBarcode() else null
-            val folderLabel = item.resolvedFolder()
-            val tagsList = item.resolvedTags()
+    val colors = QraftThemeTokens.colors
+    val pastel = colors.pastelAt(item.type.pastelIndex)
+    val isBarcode = item.resolvedCodeKind() == CodeKind.BARCODE
+    val bc = if (isBarcode) item.resolvedBarcode() else null
+    val folderLabel = item.resolvedFolder()
+    val tagsList = item.resolvedTags()
+    val borderColor by animateColorAsState(
+        targetValue = if (selected) colors.espressoAccent else colors.cardBorder,
+        animationSpec = AppMotion.snappySpring(),
+        label = "libCardBorder"
+    )
 
     Surface(
         shape = RoundedCornerShape(22.dp),
         color = colors.surface,
-        border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) colors.espressoAccent else colors.cardBorder),
+        border = BorderStroke(if (selected) 2.dp else 1.dp, borderColor),
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(
-                onClick = onOpen,
-                onLongClick = onLongPress
+            .applePressable(
+                onLongClick = onLongPress,
+                onClick = onOpen
             )
     ) {
             Row(

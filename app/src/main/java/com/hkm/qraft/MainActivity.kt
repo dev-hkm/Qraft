@@ -4,23 +4,18 @@ import android.content.Intent
 import android.graphics.Color as AndroidColor
 import android.net.Uri
 import android.os.Bundle
+import androidx.activity.BackEventCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.IntentCompat
-import androidx.core.util.Consumer
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,17 +23,25 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.util.lerp
+import androidx.core.content.IntentCompat
+import androidx.core.util.Consumer
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
 import com.hkm.qraft.model.BarcodeDesignSpec
 import com.hkm.qraft.model.BarcodeFormatType
 import com.hkm.qraft.model.CodeKind
@@ -51,143 +54,231 @@ import com.hkm.qraft.ui.screens.LibraryScreen
 import com.hkm.qraft.ui.screens.ScannerScreen
 import com.hkm.qraft.ui.screens.SettingsScreen
 import com.hkm.qraft.ui.screens.StudioScreen
+import com.hkm.qraft.ui.theme.AppMotion
+import com.hkm.qraft.ui.theme.AppleAnimatedSwap
+import com.hkm.qraft.ui.theme.AppleGlassSurface
+import com.hkm.qraft.ui.theme.AppleGlassVariant
+import com.hkm.qraft.ui.theme.HeroBoundsRegistry
+import com.hkm.qraft.ui.theme.HeroSourceRect
+import com.hkm.qraft.ui.theme.LocalHeroBounds
 import com.hkm.qraft.ui.theme.QraftTheme
 import com.hkm.qraft.ui.theme.QraftThemeTokens
+import com.hkm.qraft.ui.theme.rememberReduceMotion
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 
-private object Routes {
-    const val HOME = "home"
-    const val STUDIO = "studio"
-    const val LIBRARY = "library"
-    const val SCANNER = "scanner"
-    const val SETTINGS = "settings"
+private sealed interface QraftDest {
+    val stateKey: String
+    val heroKey: Any?
+
+    data object Home : QraftDest {
+        override val stateKey: String = "home"
+        override val heroKey: Any? = null
+    }
+
+    data class Studio(override val heroKey: Any? = null) : QraftDest {
+        override val stateKey: String = "studio"
+    }
+
+    data class Library(override val heroKey: Any? = null) : QraftDest {
+        override val stateKey: String = "library"
+    }
+
+    data class Scanner(override val heroKey: Any? = null) : QraftDest {
+        override val stateKey: String = "scanner"
+    }
+
+    data class Settings(override val heroKey: Any? = null) : QraftDest {
+        override val stateKey: String = "settings"
+    }
 }
 
-private data class FullscreenPreviewState(
+data class FullscreenPreviewState(
     val title: String,
     val encodedPayload: String,
     val design: QrDesignSpec,
     val codeKind: CodeKind = CodeKind.QR,
-    val barcode: BarcodeDesignSpec = BarcodeDesignSpec()
+    val barcode: BarcodeDesignSpec? = null
 )
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        val initialShared = extractSharedText(intent)
         setContent {
+            var pendingSharedText by remember { mutableStateOf(initialShared) }
             val viewModel: QraftViewModel = viewModel()
             val prefs by viewModel.preferences.collectAsStateWithLifecycle()
-            val systemDark = isSystemInDarkTheme()
-            val effectiveDark = when (prefs.themeMode) {
-                ThemeMode.SYSTEM -> systemDark
+            val darkTheme = when (prefs.themeMode) {
+                ThemeMode.SYSTEM -> isSystemInDarkTheme()
                 ThemeMode.LIGHT -> false
                 ThemeMode.DARK -> true
             }
 
-            DisposableEffect(effectiveDark) {
-                val barStyle = if (effectiveDark) {
-                    SystemBarStyle.dark(AndroidColor.TRANSPARENT)
-                } else {
-                    SystemBarStyle.light(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT)
+            LaunchedEffect(darkTheme) {
+                enableEdgeToEdge(
+                    statusBarStyle = if (darkTheme) {
+                        SystemBarStyle.dark(AndroidColor.TRANSPARENT)
+                    } else {
+                        SystemBarStyle.light(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT)
+                    },
+                    navigationBarStyle = if (darkTheme) {
+                        SystemBarStyle.dark(AndroidColor.TRANSPARENT)
+                    } else {
+                        SystemBarStyle.light(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT)
+                    }
+                )
+            }
+
+            DisposableEffect(Unit) {
+                val listener = Consumer<Intent> { newIntent ->
+                    extractSharedText(newIntent)?.let { pendingSharedText = it }
                 }
-                enableEdgeToEdge(statusBarStyle = barStyle, navigationBarStyle = barStyle)
-                onDispose {}
+                addOnNewIntentListener(listener)
+                onDispose { removeOnNewIntentListener(listener) }
             }
 
             QraftTheme(themeMode = prefs.themeMode) {
-                var pendingIntent by remember { mutableStateOf(intent) }
-                DisposableEffect(this) {
-                    val listener = Consumer<Intent> { newIntent ->
-                        pendingIntent = newIntent
-                    }
-                    addOnNewIntentListener(listener)
-                    onDispose { removeOnNewIntentListener(listener) }
-                }
-                QraftAppRoot(
+                QraftRoot(
                     viewModel = viewModel,
-                    incomingIntent = pendingIntent,
-                    onConsumeIncomingIntent = { pendingIntent = null }
+                    initialSharedText = pendingSharedText,
+                    onConsumeSharedText = { pendingSharedText = null }
                 )
+            }
+        }
+    }
+
+    private fun extractSharedText(intent: Intent?): String? {
+        if (intent == null) return null
+        return when (intent.action) {
+            Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
+            Intent.ACTION_VIEW -> intent.dataString
+            else -> {
+                val streamUri = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+                streamUri?.toString()
             }
         }
     }
 }
 
 @Composable
-fun QraftAppRoot(
+fun QraftRoot(
     viewModel: QraftViewModel,
-    incomingIntent: Intent? = null,
-    onConsumeIncomingIntent: () -> Unit = {}
+    initialSharedText: String? = null,
+    onConsumeSharedText: () -> Unit = {}
 ) {
-    val navController = rememberNavController()
-    val savedItems by viewModel.savedItems.collectAsStateWithLifecycle()
-    val customPresets by viewModel.customPresets.collectAsStateWithLifecycle()
     val prefs by viewModel.preferences.collectAsStateWithLifecycle()
-    val selectedHomeCategory by viewModel.selectedHomeCategory.collectAsStateWithLifecycle()
+    val savedItems by viewModel.savedItems.collectAsStateWithLifecycle()
     val draft by viewModel.draft.collectAsStateWithLifecycle()
     val scannability by viewModel.scannability.collectAsStateWithLifecycle()
     val isVerifying by viewModel.isVerifying.collectAsStateWithLifecycle()
     val isExporting by viewModel.isExporting.collectAsStateWithLifecycle()
     val batchProgress by viewModel.batchProgress.collectAsStateWithLifecycle()
+    val selectedHomeCategory by viewModel.selectedHomeCategory.collectAsStateWithLifecycle()
+    val customPresets by viewModel.customPresets.collectAsStateWithLifecycle()
     val canUndo by viewModel.canUndo.collectAsStateWithLifecycle()
     val canRedo by viewModel.canRedo.collectAsStateWithLifecycle()
 
-    val backupExportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/json")
-    ) { uri ->
-        if (uri != null) {
-            viewModel.exportBackupToUri(uri)
-        }
-    }
+    val heroRegistry = remember { HeroBoundsRegistry() }
+    val saveableHolder = rememberSaveableStateHolder()
+    val reduceMotion = rememberReduceMotion()
+    val scope = rememberCoroutineScope()
 
-    val backupImportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) {
-            viewModel.importBackupFromUri(uri)
-        }
-    }
+    val backStack = remember { mutableStateListOf<QraftDest>(QraftDest.Home) }
+    val transitionReveal = remember { Animatable(1f) }
+    var isAnimatingTransition by remember { mutableStateOf(false) }
 
-    val qrImportPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia()
-    ) { uri ->
-        if (uri != null) {
-            viewModel.importQrFromUri(uri) {
-                navController.navigate(Routes.STUDIO) { launchSingleTop = true }
+    // Predictive Back gesture state (finger-coupled quadratic softening)
+    var backGestureActive by remember { mutableStateOf(false) }
+    var backGestureCurved by remember { mutableFloatStateOf(0f) }
+    var backTouchY by remember { mutableFloatStateOf(0.5f) }
+    var backSwipeEdge by remember { mutableIntStateOf(BackEventCompat.EDGE_LEFT) }
+
+    fun pushDest(dest: QraftDest, popPreviousTop: Boolean = false) {
+        if (backStack.lastOrNull()?.stateKey == dest.stateKey && !popPreviousTop) return
+        if (popPreviousTop && backStack.size > 1) {
+            backStack.removeAt(backStack.lastIndex)
+        }
+        backStack.add(dest)
+        backGestureActive = false
+        backGestureCurved = 0f
+        scope.launch {
+            if (reduceMotion) {
+                transitionReveal.snapTo(1f)
+            } else {
+                isAnimatingTransition = true
+                transitionReveal.snapTo(0f)
+                transitionReveal.animateTo(1f, AppMotion.navigationSpring())
+                isAnimatingTransition = false
             }
         }
     }
-    val launchQrImport: () -> Unit = {
-        runCatching {
-            qrImportPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-        }
-    }
 
-    LaunchedEffect(incomingIntent) {
-        val currentIntent = incomingIntent ?: return@LaunchedEffect
-        if (currentIntent.action == Intent.ACTION_SEND) {
-            val sharedText = currentIntent.getStringExtra(Intent.EXTRA_TEXT)
-            val sharedUri = IntentCompat.getParcelableExtra(currentIntent, Intent.EXTRA_STREAM, Uri::class.java)
-            when {
-                sharedUri != null -> viewModel.importQrFromUri(sharedUri) {
-                    navController.navigate(Routes.STUDIO) { launchSingleTop = true }
-                }
-                !sharedText.isNullOrBlank() -> viewModel.importSharedPayload(sharedText) {
-                    navController.navigate(Routes.STUDIO) { launchSingleTop = true }
-                }
+    fun popDest() {
+        if (backStack.size <= 1 || isAnimatingTransition) return
+        scope.launch {
+            isAnimatingTransition = true
+            if (!reduceMotion) {
+                transitionReveal.animateTo(0f, AppMotion.navigationSpring())
+            } else {
+                transitionReveal.snapTo(0f)
             }
+            if (backStack.size > 1) {
+                backStack.removeAt(backStack.lastIndex)
+            }
+            transitionReveal.snapTo(1f)
+            backGestureActive = false
+            backGestureCurved = 0f
+            isAnimatingTransition = false
         }
-        onConsumeIncomingIntent()
     }
 
     var showCreatePicker by remember { mutableStateOf(false) }
     var showExportSheet by remember { mutableStateOf(false) }
     var showBatchSheet by remember { mutableStateOf(false) }
     var fullscreenItem by remember { mutableStateOf<FullscreenPreviewState?>(null) }
-
     var bannerMessage by remember { mutableStateOf<String?>(null) }
+
+    val qrImportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.importQrFromUri(uri) {
+                pushDest(QraftDest.Studio())
+            }
+        }
+    }
+    val launchQrImport: () -> Unit = {
+        runCatching {
+            qrImportLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+        }
+    }
+
+    val backupExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) viewModel.exportBackupToUri(uri)
+    }
+
+    val backupImportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) viewModel.importBackupFromUri(uri)
+    }
+
+    LaunchedEffect(initialSharedText) {
+        if (!initialSharedText.isNullOrBlank()) {
+            viewModel.importSharedPayload(initialSharedText) {
+                pushDest(QraftDest.Studio())
+            }
+            onConsumeSharedText()
+        }
+    }
+
     LaunchedEffect(Unit) {
         viewModel.statusBanner.collectLatest { msg ->
             bannerMessage = msg
@@ -196,48 +287,68 @@ fun QraftAppRoot(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        NavHost(
-            navController = navController,
-            startDestination = Routes.HOME,
-            enterTransition = {
-                slideInHorizontally(tween(300)) { it / 4 } + fadeIn(tween(260))
-            },
-            exitTransition = {
-                slideOutHorizontally(tween(260)) { -it / 6 } + fadeOut(tween(200))
-            },
-            popEnterTransition = {
-                slideInHorizontally(tween(280)) { -it / 6 } + fadeIn(tween(240))
-            },
-            popExitTransition = {
-                slideOutHorizontally(tween(280)) { it / 4 } + fadeOut(tween(200))
+    PredictiveBackHandler(enabled = backStack.size > 1 && !isAnimatingTransition) { progress: Flow<BackEventCompat> ->
+        backGestureActive = true
+        try {
+            progress.collect { event ->
+                val raw = event.progress.coerceIn(0f, 1f)
+                backGestureCurved = 0.7f * raw + 0.3f * (1f - (1f - raw) * (1f - raw))
+                backSwipeEdge = event.swipeEdge
+                backTouchY = if (event.touchY > 0f) event.touchY else 0.5f
             }
-        ) {
-            composable(Routes.HOME) {
-                HomeScreen(
+            // Committed back gesture: finish smoothly from current scalar down to 0
+            val startReveal = (1f - backGestureCurved).coerceIn(0f, 1f)
+            backGestureActive = false
+            backGestureCurved = 0f
+            isAnimatingTransition = true
+            if (!reduceMotion) {
+                transitionReveal.snapTo(startReveal)
+                transitionReveal.animateTo(0f, AppMotion.navigationSpring())
+            } else {
+                transitionReveal.snapTo(0f)
+            }
+            if (backStack.size > 1) {
+                backStack.removeAt(backStack.lastIndex)
+            }
+            transitionReveal.snapTo(1f)
+            isAnimatingTransition = false
+        } catch (t: Throwable) {
+            backGestureActive = false
+            backGestureCurved = 0f
+            scope.launch { transitionReveal.animateTo(1f, AppMotion.navigationSpring()) }
+            if (t !is kotlinx.coroutines.CancellationException) throw t
+        } finally {
+            if (backGestureActive) {
+                backGestureActive = false
+                backGestureCurved = 0f
+            }
+        }
+    }
+
+    @Composable
+    fun RenderRoute(dest: QraftDest) {
+        saveableHolder.SaveableStateProvider(dest.stateKey) {
+            when (dest) {
+                QraftDest.Home -> HomeScreen(
                     creatorName = prefs.creatorName,
                     themeMode = prefs.themeMode,
                     items = savedItems,
                     selectedCategory = selectedHomeCategory,
                     onSelectCategory = viewModel::selectHomeCategory,
                     onCycleTheme = viewModel::cycleThemeMode,
-                    onOpenSettings = {
-                        navController.navigate(Routes.SETTINGS) { launchSingleTop = true }
-                    },
+                    onOpenSettings = { pushDest(QraftDest.Settings("hero_settings")) },
                     onOpenStudioNew = { type ->
                         viewModel.startNewQr(type)
-                        navController.navigate(Routes.STUDIO)
+                        pushDest(QraftDest.Studio("hero_type_${type.name}"))
                     },
                     onOpenStudioNewBarcode = {
                         viewModel.startNewBarcode(BarcodeFormatType.CODE_128)
-                        navController.navigate(Routes.STUDIO)
+                        pushDest(QraftDest.Studio("hero_barcode"))
                     },
-                    onOpenScanner = {
-                        navController.navigate(Routes.SCANNER) { launchSingleTop = true }
-                    },
+                    onOpenScanner = { pushDest(QraftDest.Scanner("hero_scanner")) },
                     onOpenExisting = { item ->
                         viewModel.openExistingQr(item)
-                        navController.navigate(Routes.STUDIO)
+                        pushDest(QraftDest.Studio("hero_card_${item.id}"))
                     },
                     onQuickFullscreen = { item ->
                         fullscreenItem = FullscreenPreviewState(
@@ -249,20 +360,18 @@ fun QraftAppRoot(
                         )
                     },
                     onToggleFavorite = viewModel::toggleItemFavorite,
-                    onOpenLibrary = { navController.navigate(Routes.LIBRARY) },
+                    onOpenLibrary = { pushDest(QraftDest.Library("hero_library")) },
                     onOpenBatch = { showBatchSheet = true },
                     onOpenCreatePicker = { showCreatePicker = true },
                     onImportQr = launchQrImport
                 )
-            }
 
-            composable(Routes.LIBRARY) {
-                LibraryScreen(
+                is QraftDest.Library -> LibraryScreen(
                     items = savedItems,
-                    onBack = { navController.popBackStack() },
+                    onBack = { popDest() },
                     onOpenExisting = { item ->
                         viewModel.openExistingQr(item)
-                        navController.navigate(Routes.STUDIO)
+                        pushDest(QraftDest.Studio("hero_lib_${item.id}"))
                     },
                     onDuplicate = viewModel::duplicateQr,
                     onToggleFavorite = viewModel::toggleItemFavorite,
@@ -279,9 +388,7 @@ fun QraftAppRoot(
                     onOpenBatch = { showBatchSheet = true },
                     onCreateNew = { showCreatePicker = true },
                     onImportQr = launchQrImport,
-                    onOpenScanner = {
-                        navController.navigate(Routes.SCANNER) { launchSingleTop = true }
-                    },
+                    onOpenScanner = { pushDest(QraftDest.Scanner("hero_lib_scanner")) },
                     onBulkFavorite = viewModel::bulkSetFavorite,
                     onBulkDelete = viewModel::bulkDeleteItems,
                     onExportPrintSheet = viewModel::exportLibraryPrintSheet,
@@ -290,10 +397,8 @@ fun QraftAppRoot(
                     onRenameItem = viewModel::renameItem,
                     onOrganizeItem = viewModel::updateItemOrganization
                 )
-            }
 
-            composable(Routes.STUDIO) {
-                StudioScreen(
+                is QraftDest.Studio -> StudioScreen(
                     draft = draft,
                     customPresets = customPresets,
                     scannability = scannability,
@@ -303,7 +408,7 @@ fun QraftAppRoot(
                     onUndo = viewModel::undoDesignEdit,
                     onRedo = viewModel::redoDesignEdit,
                     onExtractBrandColors = viewModel::extractAndApplyBrandPalette,
-                    onBack = { navController.popBackStack() },
+                    onBack = { popDest() },
                     onTitleChange = viewModel::updateDraftTitle,
                     onCodeKindChange = viewModel::setDraftCodeKind,
                     onTypeChange = viewModel::updateDraftType,
@@ -330,37 +435,30 @@ fun QraftAppRoot(
                         )
                     }
                 )
-            }
 
-            composable(Routes.SCANNER) {
-                ScannerScreen(
-                    onBack = { navController.popBackStack() },
+                is QraftDest.Scanner -> ScannerScreen(
+                    onBack = { popDest() },
                     onOpenInStudio = { rawText, barcodeFormat ->
                         viewModel.openScannedInStudio(rawText, barcodeFormat)
-                        navController.navigate(Routes.STUDIO) {
-                            popUpTo(Routes.SCANNER) { inclusive = true }
-                            launchSingleTop = true
-                        }
+                        pushDest(QraftDest.Studio(), popPreviousTop = true)
                     },
                     onSaveToLibrary = viewModel::saveScannedToLibrary,
                     onCopyResult = viewModel::copyRawText
                 )
-            }
 
-            composable(Routes.SETTINGS) {
-                SettingsScreen(
+                is QraftDest.Settings -> SettingsScreen(
                     preferences = prefs,
                     savedCount = savedItems.count { !it.isArchived },
                     archivedCount = savedItems.count { it.isArchived },
                     customPresetCount = customPresets.size,
-                    onBack = { navController.popBackStack() },
+                    onBack = { popDest() },
                     onThemeChange = viewModel::setThemeMode,
                     onCreatorNameChange = viewModel::setCreatorName,
                     onAutoVerifyChange = viewModel::setAutoVerify,
                     onDefaultFormatChange = viewModel::setDefaultExportFormat,
                     onDefaultResolutionChange = viewModel::setDefaultExportResolution,
                     onExportBackup = {
-                        runCatching { backupExportLauncher.launch("qraft_backup_v6.qraft") }
+                        runCatching { backupExportLauncher.launch("qraft_backup_v7.qraft") }
                     },
                     onImportBackup = {
                         runCatching { backupImportLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }
@@ -368,39 +466,146 @@ fun QraftAppRoot(
                 )
             }
         }
+    }
 
-        // Apple-style floating status toast pill
-        AnimatedVisibility(
-            visible = bannerMessage != null,
-            enter = slideInVertically { -it } + fadeIn(),
-            exit = slideOutVertically { -it } + fadeOut(),
+    var containerSize by remember { mutableStateOf(IntSize.Zero) }
+
+    CompositionLocalProvider(LocalHeroBounds provides heroRegistry) {
+        Box(
             modifier = Modifier
-                .align(Alignment.TopCenter)
-                .statusBarsPadding()
-                .padding(top = 12.dp, start = 20.dp, end = 20.dp)
+                .fillMaxSize()
+                .onSizeChanged { containerSize = it }
         ) {
-            val colors = QraftThemeTokens.colors
-            Surface(
-                shape = RoundedCornerShape(50),
-                color = colors.activePillBg,
-                shadowElevation = 8.dp
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+            val effectiveReveal = if (backGestureActive) {
+                (1f - backGestureCurved).coerceIn(0f, 1f)
+            } else {
+                transitionReveal.value.coerceIn(0f, 1f)
+            }
+
+            if (backStack.size == 1) {
+                RenderRoute(backStack.first())
+            } else {
+                val underDest = backStack[backStack.lastIndex - 1]
+                val topDest = backStack.last()
+                val heroSource: HeroSourceRect? = heroRegistry.get(topDest.heroKey)
+
+                // Layer underneath recedes smoothly 1.0 -> 0.94 synchronized with reveal scalar
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            if (!reduceMotion) {
+                                val s = lerp(1.0f, 0.945f, effectiveReveal)
+                                scaleX = s
+                                scaleY = s
+                                alpha = lerp(1.0f, 0.90f, effectiveReveal)
+                                transformOrigin = TransformOrigin.Center
+                            }
+                        }
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.CheckCircle,
-                        contentDescription = null,
-                        tint = colors.activePillContent,
-                        modifier = Modifier.size(18.dp)
+                    RenderRoute(underDest)
+                }
+
+                // Optical depth scrim separating stacked layers
+                if (!reduceMotion) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer { alpha = effectiveReveal * 0.24f }
+                            .background(Color.Black)
                     )
-                    Text(
-                        text = bannerMessage.orEmpty(),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = colors.activePillContent
-                    )
+                }
+
+                // Top active route: Hero-bounds morph if clicked item/card known, else sleek edge depth push + peel
+                val cornerRadiusDp = when {
+                    backGestureActive -> lerp(0f, 30f, backGestureCurved).dp
+                    heroSource != null -> lerp(heroSource.cornerRadiusDp, 0f, effectiveReveal).dp
+                    else -> lerp(26f, 0f, effectiveReveal).dp
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(cornerRadiusDp))
+                        .graphicsLayer {
+                            val w = containerSize.width.toFloat().coerceAtLeast(1f)
+                            val h = containerSize.height.toFloat().coerceAtLeast(1f)
+                            if (backGestureActive) {
+                                val c = backGestureCurved
+                                val s = lerp(1.0f, 0.88f, c)
+                                scaleX = s
+                                scaleY = s
+                                val dir = if (backSwipeEdge == BackEventCompat.EDGE_LEFT) 1f else -1f
+                                translationX = dir * w * 0.14f * c
+                                val yNorm = (backTouchY / h).coerceIn(0f, 1f) - 0.5f
+                                translationY = yNorm * 32.dp.toPx() * c
+                                rotationZ = dir * yNorm * 2.4f * c
+                                alpha = 1f
+                                transformOrigin = TransformOrigin.Center
+                            } else if (!reduceMotion && heroSource != null) {
+                                val rect: Rect = heroSource.rect
+                                // Uniform scale preserves text/QR aspect ratio during spatial hero morph
+                                val startScale = maxOf(rect.width / w, rect.height / h).coerceIn(0.62f, 0.95f)
+                                val s = lerp(startScale, 1f, effectiveReveal)
+                                scaleX = s
+                                scaleY = s
+                                val heroCx = rect.center.x - w / 2f
+                                val heroCy = rect.center.y - h / 2f
+                                translationX = lerp(heroCx, 0f, effectiveReveal)
+                                translationY = lerp(heroCy, 0f, effectiveReveal)
+                                alpha = (effectiveReveal / 0.25f).coerceIn(0f, 1f)
+                                transformOrigin = TransformOrigin.Center
+                            } else if (!reduceMotion) {
+                                translationX = (1f - effectiveReveal) * (w * 0.26f)
+                                val s = lerp(0.965f, 1f, effectiveReveal)
+                                scaleX = s
+                                scaleY = s
+                                alpha = (effectiveReveal / 0.30f).coerceIn(0f, 1f)
+                            }
+                        }
+                ) {
+                    RenderRoute(topDest)
+                }
+            }
+
+            // Dynamic-Island Apple Glass Status Toast
+            AnimatedVisibility(
+                visible = bannerMessage != null,
+                enter = AppMotion.toastEnter,
+                exit = AppMotion.toastExit,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 12.dp, start = 20.dp, end = 20.dp)
+            ) {
+                val colors = QraftThemeTokens.colors
+                AppleGlassSurface(
+                    shape = RoundedCornerShape(50),
+                    cornerRadiusDp = 50.dp,
+                    variant = AppleGlassVariant.Regular,
+                    enableRefraction = true,
+                    elevation = 10.dp
+                ) {
+                    AppleAnimatedSwap(targetState = bannerMessage.orEmpty()) { messageText ->
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.CheckCircle,
+                                contentDescription = null,
+                                tint = colors.espressoAccent,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = messageText,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = colors.textPrimary
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -411,16 +616,14 @@ fun QraftAppRoot(
             onDismiss = { showCreatePicker = false },
             onSelectType = { type ->
                 viewModel.startNewQr(type)
-                navController.navigate(Routes.STUDIO)
+                pushDest(QraftDest.Studio("hero_create"))
             },
             onSelectBarcode = { format ->
                 viewModel.startNewBarcode(format)
-                navController.navigate(Routes.STUDIO)
+                pushDest(QraftDest.Studio("hero_create"))
             },
             onImportQrImage = launchQrImport,
-            onOpenScanner = {
-                navController.navigate(Routes.SCANNER) { launchSingleTop = true }
-            }
+            onOpenScanner = { pushDest(QraftDest.Scanner("hero_scanner")) }
         )
     }
 

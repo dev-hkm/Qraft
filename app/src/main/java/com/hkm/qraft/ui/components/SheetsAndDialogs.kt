@@ -5,10 +5,15 @@ import android.content.Context
 import android.content.ContextWrapper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
@@ -23,7 +28,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -35,8 +47,12 @@ import com.hkm.qraft.model.*
 import com.hkm.qraft.qr.BatchSequenceExpander
 import com.hkm.qraft.qr.PrintSheetLayout
 import com.hkm.qraft.qr.QrExporter
+import com.hkm.qraft.ui.theme.AppMotion
+import com.hkm.qraft.ui.theme.AppleGlassSurface
+import com.hkm.qraft.ui.theme.AppleGlassVariant
 import com.hkm.qraft.ui.theme.QraftThemeTokens
-import com.hkm.qraft.ui.theme.appleBounceClick
+import com.hkm.qraft.ui.theme.applePressable
+import com.hkm.qraft.ui.theme.rememberReduceMotion
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -55,7 +71,7 @@ fun CreateQrTypeSheet(
         hardCap = 740.dp,
         containerColor = colors.surface,
         contentColor = colors.textPrimary
-    ) { _ ->
+    ) { dismissSheet ->
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -91,8 +107,8 @@ fun CreateQrTypeSheet(
                                     color = colors.espressoAccent,
                                     modifier = Modifier
                                         .weight(1f)
-                                        .appleBounceClick {
-                                            onDismiss()
+                                        .applePressable {
+                                            dismissSheet()
                                             onOpenScanner()
                                         }
                                 ) {
@@ -128,8 +144,8 @@ fun CreateQrTypeSheet(
                                     border = BorderStroke(1.dp, colors.cardBorder),
                                     modifier = Modifier
                                         .weight(1f)
-                                        .appleBounceClick {
-                                            onDismiss()
+                                        .applePressable {
+                                            dismissSheet()
                                             onImportQrImage()
                                         }
                                 ) {
@@ -173,8 +189,8 @@ fun CreateQrTypeSheet(
                             border = BorderStroke(1.dp, colors.cardBorder),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .appleBounceClick {
-                                    onDismiss()
+                                .applePressable {
+                                    dismissSheet()
                                     onSelectType(type)
                                 }
                         ) {
@@ -230,8 +246,8 @@ fun CreateQrTypeSheet(
                                 border = BorderStroke(1.dp, colors.cardBorder),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .appleBounceClick {
-                                        onDismiss()
+                                    .applePressable {
+                                        dismissSheet()
                                         onSelectBarcode(fmt)
                                     }
                             ) {
@@ -388,7 +404,7 @@ fun ExportQrSheet(
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .appleBounceClick { selectedFormat = fmt }
+                            .applePressable { selectedFormat = fmt }
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
@@ -487,7 +503,7 @@ fun ExportQrSheet(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .appleBounceClick { showPrintSheetOptions = !showPrintSheetOptions },
+                                .applePressable { showPrintSheetOptions = !showPrintSheetOptions },
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
@@ -508,43 +524,49 @@ fun ExportQrSheet(
                             )
                         }
 
-                        if (showPrintSheetOptions) {
-                            Row(
-                                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                PrintSheetLayout.entries.forEach { layout ->
-                                    SelectableChip(
-                                        label = layout.label,
-                                        selected = printLayout == layout,
-                                        onClick = { printLayout = layout }
+                        AnimatedVisibility(
+                            visible = showPrintSheetOptions,
+                            enter = AppMotion.softExpandEnter,
+                            exit = AppMotion.softExpandExit
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Row(
+                                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    PrintSheetLayout.entries.forEach { layout ->
+                                        SelectableChip(
+                                            label = layout.label,
+                                            selected = printLayout == layout,
+                                            onClick = { printLayout = layout }
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = printLayout.description,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = colors.textSecondary
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    QraftPillButton(
+                                        text = "Save A4 PNG",
+                                        variant = QraftButtonVariant.TONAL,
+                                        leadingIcon = Icons.Rounded.Image,
+                                        enabled = !isExporting,
+                                        height = 42.dp,
+                                        modifier = Modifier.weight(1f),
+                                        onClick = { onExportPrintSheet(printLayout, false) }
+                                    )
+                                    QraftPillButton(
+                                        text = "Save 300 DPI PDF",
+                                        variant = QraftButtonVariant.PRIMARY,
+                                        leadingIcon = Icons.Rounded.PictureAsPdf,
+                                        enabled = !isExporting,
+                                        height = 42.dp,
+                                        modifier = Modifier.weight(1f),
+                                        onClick = { onExportPrintSheet(printLayout, true) }
                                     )
                                 }
-                            }
-                            Text(
-                                text = printLayout.description,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = colors.textSecondary
-                            )
-                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                QraftPillButton(
-                                    text = "Save A4 PNG",
-                                    variant = QraftButtonVariant.TONAL,
-                                    leadingIcon = Icons.Rounded.Image,
-                                    enabled = !isExporting,
-                                    height = 42.dp,
-                                    modifier = Modifier.weight(1f),
-                                    onClick = { onExportPrintSheet(printLayout, false) }
-                                )
-                                QraftPillButton(
-                                    text = "Save 300 DPI PDF",
-                                    variant = QraftButtonVariant.PRIMARY,
-                                    leadingIcon = Icons.Rounded.PictureAsPdf,
-                                    enabled = !isExporting,
-                                    height = 42.dp,
-                                    modifier = Modifier.weight(1f),
-                                    onClick = { onExportPrintSheet(printLayout, true) }
-                                )
                             }
                         }
                     }
@@ -564,6 +586,40 @@ fun FullscreenScanDialog(
     barcodeSpec: BarcodeDesignSpec? = null
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val haptics = LocalHapticFeedback.current
+    val reduceMotion = rememberReduceMotion()
+    val currentOnDismiss by rememberUpdatedState(onDismiss)
+
+    val revealAnim = remember { Animatable(if (reduceMotion) 1f else 0f) }
+    val dragYAnim = remember { Animatable(0f) }
+    var isClosing by remember { mutableStateOf(false) }
+    var backProgress by remember { mutableFloatStateOf(0f) }
+
+    fun dismissSmooth(velocityY: Float = 0f) {
+        if (isClosing) return
+        isClosing = true
+        scope.launch {
+            if (reduceMotion) {
+                revealAnim.snapTo(0f)
+            } else {
+                revealAnim.animateTo(
+                    targetValue = 0f,
+                    animationSpec = AppMotion.navigationSpring(),
+                    initialVelocity = (-velocityY / with(density) { 400.dp.toPx() }).coerceIn(-5f, 0f)
+                )
+            }
+            currentOnDismiss()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        if (!reduceMotion) {
+            revealAnim.animateTo(1f, AppMotion.navigationSpring())
+        }
+    }
+
     DisposableEffect(Unit) {
         val activity = context.findActivity()
         val window = activity?.window
@@ -583,22 +639,85 @@ fun FullscreenScanDialog(
     }
 
     Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { dismissSmooth() },
         properties = DialogProperties(
             usePlatformDefaultWidth = false,
             decorFitsSystemWindows = false
         )
     ) {
+        QraftPredictiveBackHandler(
+            enabled = !isClosing,
+            onProgress = { backProgress = it },
+            onBack = { dismissSmooth() }
+        )
+
         val colors = QraftThemeTokens.colors
+        val dismissThresholdPx = with(density) { 130.dp.toPx() }
+        val dragDismissFrac = (dragYAnim.value / dismissThresholdPx).coerceIn(0f, 1f)
+        val combinedAlpha = revealAnim.value.coerceIn(0f, 1f) *
+            (1f - dragDismissFrac * 0.45f) *
+            (1f - backProgress * 0.35f)
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(colors.background.copy(alpha = 0.98f))
-                .appleBounceClick(scalePressed = 1f, haptic = false) { onDismiss() }
+                .graphicsLayer { alpha = combinedAlpha }
+                .background(colors.background.copy(alpha = 0.96f))
+                .pointerInput(Unit) {
+                    val tracker = VelocityTracker()
+                    detectVerticalDragGestures(
+                        onDragStart = { tracker.resetTracking() },
+                        onVerticalDrag = { change, dragAmount ->
+                            change.consume()
+                            tracker.addPosition(change.uptimeMillis, change.position)
+                            val next = dragYAnim.value + dragAmount
+                            val mapped = if (next < 0f) {
+                                AppMotion.rubberBand(next, 640f, constant = 0.55f)
+                            } else {
+                                next
+                            }
+                            scope.launch { dragYAnim.snapTo(mapped) }
+                        },
+                        onDragEnd = {
+                            val vy = tracker.calculateVelocity().y
+                            val projected = dragYAnim.value + AppMotion.projectOffset(vy, 0.99f)
+                            if (projected > dismissThresholdPx || vy > 1100f) {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                dismissSmooth(vy)
+                            } else {
+                                scope.launch {
+                                    dragYAnim.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = AppMotion.navigationSpring(),
+                                        initialVelocity = vy
+                                    )
+                                }
+                            }
+                        },
+                        onDragCancel = {
+                            scope.launch { dragYAnim.animateTo(0f, AppMotion.navigationSpring()) }
+                        }
+                    )
+                }
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = { dismissSmooth() }
+                )
                 .padding(24.dp),
             contentAlignment = Alignment.Center
         ) {
             Column(
+                modifier = Modifier.graphicsLayer {
+                    val p = revealAnim.value
+                    val backCurved = 0.7f * backProgress +
+                        0.3f * (1f - (1f - backProgress) * (1f - backProgress))
+                    val s = (0.92f + 0.08f * p) * (1f - 0.06f * backCurved) * (1f - 0.06f * dragDismissFrac)
+                    scaleX = s
+                    scaleY = s
+                    translationY = dragYAnim.value + backCurved * 28.dp.toPx()
+                    transformOrigin = TransformOrigin.Center
+                },
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(20.dp)
             ) {
@@ -623,12 +742,14 @@ fun FullscreenScanDialog(
                     )
                 }
 
-                Surface(
+                AppleGlassSurface(
                     shape = RoundedCornerShape(50),
-                    color = colors.surfaceMuted
+                    cornerRadiusDp = 50.dp,
+                    variant = AppleGlassVariant.Regular,
+                    enableRefraction = true
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -639,7 +760,7 @@ fun FullscreenScanDialog(
                             modifier = Modifier.size(18.dp)
                         )
                         Text(
-                            text = "Screen brightness boosted • Tap anywhere to close",
+                            text = "Brightness boosted • Swipe or tap to close",
                             style = MaterialTheme.typography.labelMedium,
                             color = colors.textSecondary
                         )
@@ -854,7 +975,11 @@ fun BatchGeneratorSheet(
                 checked = exportPdfSheet,
                 onCheckedChange = { exportPdfSheet = it }
             )
-            if (exportPdfSheet) {
+            AnimatedVisibility(
+                visible = exportPdfSheet,
+                enter = AppMotion.softExpandEnter,
+                exit = AppMotion.softExpandExit
+            ) {
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)

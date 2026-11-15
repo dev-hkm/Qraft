@@ -28,7 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hkm.qraft.qr.QrEngine
 import com.hkm.qraft.ui.theme.QraftThemeTokens
-import com.hkm.qraft.ui.theme.appleBounceClick
+import com.hkm.qraft.ui.theme.applePressable
 import kotlin.math.roundToInt
 
 object ColorSwatches {
@@ -295,7 +295,7 @@ fun ColorPickerModalSheet(
                                 .clip(CircleShape)
                                 .background(Color(swatch))
                                 .border(1.dp, colors.cardBorder, CircleShape)
-                                .appleBounceClick {
+                                .applePressable(pressedScale = 0.90f) {
                                     val arr = FloatArray(3)
                                     android.graphics.Color.colorToHSV(swatch.toInt(), arr)
                                     hue = arr[0]
@@ -323,7 +323,7 @@ fun ColorPickerModalSheet(
                                 color = if (isSelected) colors.espressoAccent else colors.cardBorder,
                                 shape = CircleShape
                             )
-                            .appleBounceClick {
+                            .applePressable(pressedScale = 0.90f) {
                                 val arr = FloatArray(3)
                                 android.graphics.Color.colorToHSV(swatch.toInt(), arr)
                                 hue = arr[0]

@@ -22,14 +22,12 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -81,9 +79,16 @@ import com.hkm.qraft.qr.QrCodeImporter
 import com.hkm.qraft.qr.QrExporter
 import com.hkm.qraft.ui.components.QraftModalSheet
 import com.hkm.qraft.ui.components.QraftSectionCard
-import com.hkm.qraft.ui.components.QraftStatusBarScrim
+import com.hkm.qraft.ui.theme.AppMotion
+import com.hkm.qraft.ui.theme.AppleGlassSurface
+import com.hkm.qraft.ui.theme.AppleGlassVariant
+import com.hkm.qraft.ui.theme.AppleProgressiveEdgeFrost
+import com.hkm.qraft.ui.theme.EdgeFrostDirection
 import com.hkm.qraft.ui.theme.QraftThemeTokens
-import com.hkm.qraft.ui.theme.appleBounceClick
+import com.hkm.qraft.ui.theme.appleHazeSource
+import com.hkm.qraft.ui.theme.applePressable
+import com.hkm.qraft.ui.theme.rememberReduceMotion
+import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -231,24 +236,36 @@ fun ScannerScreen(
         }
     }
 
+    val reduceMotion = rememberReduceMotion()
+    val fallbackHazeState = rememberHazeState()
+    var lastHapticZoomBucket by remember { mutableIntStateOf(10) }
+
     val focusPulse = remember { Animatable(1.4f) }
     LaunchedEffect(focusTapPoint) {
         if (focusTapPoint != null) {
-            focusPulse.snapTo(1.45f)
-            focusPulse.animateTo(1f, tween(220))
+            if (reduceMotion) {
+                focusPulse.snapTo(1f)
+            } else {
+                focusPulse.snapTo(1.42f)
+                focusPulse.animateTo(1f, AppMotion.fluidSpring())
+            }
         }
     }
 
     val infiniteTransition = rememberInfiniteTransition(label = "scannerLaser")
-    val laserProgress by infiniteTransition.animateFloat(
+    val animatedLaserProgress by infiniteTransition.animateFloat(
         initialValue = 0.08f,
         targetValue = 0.92f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1900, easing = LinearEasing),
+            animation = tween(
+                durationMillis = 2000,
+                easing = CubicBezierEasing(0.45f, 0.05f, 0.55f, 0.95f)
+            ),
             repeatMode = RepeatMode.Reverse
         ),
         label = "laserY"
     )
+    val laserProgress = if (reduceMotion) 0.5f else animatedLaserProgress
 
     Box(
         modifier = modifier
@@ -418,15 +435,20 @@ fun ScannerScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     if (onBack != null) {
-                        Surface(
+                        AppleGlassSurface(
                             shape = CircleShape,
-                            color = Color.Black.copy(alpha = 0.56f),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f)),
+                            cornerRadiusDp = 24.dp,
+                            variant = AppleGlassVariant.Clear,
+                            enableRefraction = true,
+                            contentColor = Color.White,
                             modifier = Modifier
-                                .size(40.dp)
-                                .appleBounceClick { onBack() }
+                                .size(48.dp)
+                                .applePressable { onBack() }
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.fillMaxSize()
+                            ) {
                                 Icon(
                                     imageVector = Icons.Rounded.ArrowBackIosNew,
                                     contentDescription = "Back",
@@ -436,20 +458,21 @@ fun ScannerScreen(
                             }
                         }
                     } else {
-                        Spacer(Modifier.size(40.dp))
+                        Spacer(Modifier.size(48.dp))
                     }
 
                     Box(
                         modifier = Modifier.weight(1f),
                         contentAlignment = Alignment.Center
                     ) {
-                        Surface(
+                        AppleGlassSurface(
                             shape = RoundedCornerShape(50),
-                            color = Color.Black.copy(alpha = 0.56f),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f))
+                            cornerRadiusDp = 50.dp,
+                            variant = AppleGlassVariant.Clear,
+                            contentColor = Color.White
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
@@ -471,31 +494,55 @@ fun ScannerScreen(
                     }
 
                     // Scan history pill button
-                    Surface(
-                        shape = RoundedCornerShape(50),
-                        color = if (scanHistory.isNotEmpty()) Color.White else Color.Black.copy(alpha = 0.56f),
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
-                        modifier = Modifier
-                            .height(40.dp)
-                            .appleBounceClick { showHistorySheet = true }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    if (scanHistory.isNotEmpty()) {
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = Color.White,
+                            border = BorderStroke(1.dp, Color.White),
+                            modifier = Modifier
+                                .defaultMinSize(minWidth = 48.dp, minHeight = 44.dp)
+                                .applePressable { showHistorySheet = true }
                         ) {
-                            Icon(
-                                Icons.Rounded.History,
-                                contentDescription = "Scan history",
-                                tint = if (scanHistory.isNotEmpty()) Color.Black else Color.White,
-                                modifier = Modifier.size(17.dp)
-                            )
-                            if (scanHistory.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.History,
+                                    contentDescription = "Scan history",
+                                    tint = Color.Black,
+                                    modifier = Modifier.size(17.dp)
+                                )
                                 Text(
                                     text = "${scanHistory.size}",
-                                    style = MaterialTheme.typography.labelMedium,
+                                    style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                                     color = Color.Black,
                                     fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    } else {
+                        AppleGlassSurface(
+                            shape = RoundedCornerShape(50),
+                            cornerRadiusDp = 50.dp,
+                            variant = AppleGlassVariant.Clear,
+                            enableRefraction = true,
+                            contentColor = Color.White,
+                            modifier = Modifier
+                                .defaultMinSize(minWidth = 48.dp, minHeight = 44.dp)
+                                .applePressable { showHistorySheet = true }
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .padding(horizontal = 13.dp, vertical = 9.dp)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.History,
+                                    contentDescription = "Scan history",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(17.dp)
                                 )
                             }
                         }
@@ -512,7 +559,11 @@ fun ScannerScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    AnimatedVisibility(visible = scanError != null, enter = fadeIn(), exit = fadeOut()) {
+                    AnimatedVisibility(
+                        visible = scanError != null,
+                        enter = AppMotion.floatingBarEnter,
+                        exit = AppMotion.floatingBarExit
+                    ) {
                         Surface(
                             shape = RoundedCornerShape(14.dp),
                             color = colors.dangerBg,
@@ -527,7 +578,7 @@ fun ScannerScreen(
                         }
                     }
 
-                    // Zoom control bar (presets 1x / 2x / 3x / 5x + smooth slider)
+                    // Zoom control bar (presets 1x / 2x / 3x / 5x + smooth slider with discrete haptics)
                     if (maxZoomRatio > minZoomRatio + 0.1f) {
                         val zoomSteps = remember(minZoomRatio, maxZoomRatio) {
                             buildList {
@@ -538,10 +589,12 @@ fun ScannerScreen(
                                 if (maxZoomRatio >= 5f) add(5f) else if (maxZoomRatio > 3.2f) add(maxZoomRatio)
                             }.distinct()
                         }
-                        Surface(
+                        AppleGlassSurface(
                             shape = RoundedCornerShape(22.dp),
-                            color = Color.Black.copy(alpha = 0.58f),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)),
+                            cornerRadiusDp = 22.dp,
+                            variant = AppleGlassVariant.Clear,
+                            enableRefraction = true,
+                            contentColor = Color.White,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(
@@ -566,16 +619,17 @@ fun ScannerScreen(
                                             }
                                             Surface(
                                                 shape = RoundedCornerShape(50),
-                                                color = if (selected) Color.White else Color.White.copy(alpha = 0.14f),
-                                                modifier = Modifier.appleBounceClick {
+                                                color = if (selected) Color.White else Color.White.copy(alpha = 0.16f),
+                                                modifier = Modifier.applePressable {
                                                     val target = preset.coerceIn(minZoomRatio, maxZoomRatio)
                                                     currentZoomRatio = target
+                                                    lastHapticZoomBucket = (target * 2f).roundToInt()
                                                     runCatching { cameraRef?.cameraControl?.setZoomRatio(target) }
                                                 }
                                             ) {
                                                 Text(
                                                     text = label,
-                                                    style = MaterialTheme.typography.labelMedium,
+                                                    style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                                                     color = if (selected) Color.Black else Color.White,
                                                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                                                     modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp)
@@ -585,14 +639,22 @@ fun ScannerScreen(
                                     }
                                     Text(
                                         text = "${((currentZoomRatio * 10f).roundToInt() / 10f)}x",
-                                        style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
-                                        color = Color.White.copy(alpha = 0.85f)
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontFamily = FontFamily.Monospace,
+                                            fontFeatureSettings = "tnum"
+                                        ),
+                                        color = Color.White.copy(alpha = 0.90f)
                                     )
                                 }
                                 Slider(
                                     value = currentZoomRatio.coerceIn(minZoomRatio, maxZoomRatio),
                                     onValueChange = { z ->
                                         currentZoomRatio = z
+                                        val bucket = (z * 2f).roundToInt()
+                                        if (bucket != lastHapticZoomBucket) {
+                                            lastHapticZoomBucket = bucket
+                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        }
                                         runCatching { cameraRef?.cameraControl?.setZoomRatio(z) }
                                     },
                                     valueRange = minZoomRatio..maxZoomRatio,
@@ -650,10 +712,11 @@ fun ScannerScreen(
                 }
             }
         } else {
-            // Permission / Headless fallback with Tonser edge-to-edge scrolling header
+            // Permission / Headless fallback with live Haze edge-to-edge scrolling chrome
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .appleHazeSource(fallbackHazeState)
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -672,8 +735,8 @@ fun ScannerScreen(
                             color = colors.surface,
                             border = BorderStroke(1.dp, colors.cardBorder),
                             modifier = Modifier
-                                .size(40.dp)
-                                .appleBounceClick { onBack() }
+                                .size(48.dp)
+                                .applePressable { onBack() }
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
@@ -703,15 +766,21 @@ fun ScannerScreen(
                             shape = RoundedCornerShape(50),
                             color = colors.surface,
                             border = BorderStroke(1.dp, colors.cardBorder),
-                            modifier = Modifier.appleBounceClick { showHistorySheet = true }
+                            modifier = Modifier
+                                .defaultMinSize(minHeight = 44.dp)
+                                .applePressable { showHistorySheet = true }
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
                             ) {
                                 Icon(Icons.Rounded.History, null, tint = colors.textPrimary, modifier = Modifier.size(16.dp))
-                                Text("${scanHistory.size}", style = MaterialTheme.typography.labelMedium, color = colors.textPrimary)
+                                Text(
+                                    text = "${scanHistory.size}",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+                                    color = colors.textPrimary
+                                )
                             }
                         }
                     }
@@ -806,7 +875,14 @@ fun ScannerScreen(
                 }
                 Spacer(Modifier.height(110.dp))
             }
-            QraftStatusBarScrim(modifier = Modifier.align(Alignment.TopCenter))
+            AppleProgressiveEdgeFrost(
+                hazeState = fallbackHazeState,
+                direction = EdgeFrostDirection.Top,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .height(WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 18.dp)
+            )
         }
     }
 
@@ -1054,7 +1130,7 @@ fun ScannerScreen(
                             border = BorderStroke(1.dp, colors.cardBorder),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .appleBounceClick {
+                                .applePressable(pressedScale = 0.985f) {
                                     showHistorySheet = false
                                     scannedResult = entry
                                 }
@@ -1218,29 +1294,64 @@ private fun ScannerRoundButton(
     active: Boolean,
     onClick: () -> Unit
 ) {
-    Surface(
-        shape = RoundedCornerShape(50),
-        color = if (active) Color.White else Color.Black.copy(alpha = 0.62f),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = if (active) 1f else 0.25f)),
-        modifier = Modifier.appleBounceClick(onClick = onClick)
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+    if (active) {
+        Surface(
+            shape = RoundedCornerShape(50),
+            color = Color.White,
+            border = BorderStroke(1.dp, Color.White),
+            modifier = Modifier
+                .defaultMinSize(minHeight = 44.dp)
+                .applePressable(onClick = onClick)
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = if (active) Color.Black else Color.White,
-                modifier = Modifier.size(18.dp)
-            )
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                color = if (active) Color.Black else Color.White,
-                maxLines = 1
-            )
+            Row(
+                modifier = Modifier.padding(horizontal = 15.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = label,
+                    tint = Color.Black,
+                    modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.Black,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
+                )
+            }
+        }
+    } else {
+        AppleGlassSurface(
+            shape = RoundedCornerShape(50),
+            cornerRadiusDp = 50.dp,
+            variant = AppleGlassVariant.Clear,
+            enableRefraction = true,
+            contentColor = Color.White,
+            modifier = Modifier
+                .defaultMinSize(minHeight = 44.dp)
+                .applePressable(onClick = onClick)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 15.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = label,
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.White,
+                    maxLines = 1
+                )
+            }
         }
     }
 }

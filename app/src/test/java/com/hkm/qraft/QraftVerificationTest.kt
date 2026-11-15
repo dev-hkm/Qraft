@@ -815,4 +815,23 @@ class QraftVerificationTest {
         assertNotNull(activity)
         controller.pause().stop().destroy()
     }
+
+    @Test
+    fun appleMotionPhysicsAndHeroRegistryWorkDeterministically() {
+        val projected = com.hkm.qraft.ui.theme.AppMotion.projectOffset(velocityPxPerSec = 1000f)
+        assertTrue("Positive velocity projects forward monotonically", projected > 0.5f)
+        assertTrue("Zero velocity projects zero displacement", com.hkm.qraft.ui.theme.AppMotion.projectOffset(0f) == 0f)
+
+        val rubberNearZero = com.hkm.qraft.ui.theme.AppMotion.rubberBand(overshoot = 10f, dimension = 300f)
+        val rubberLarge = com.hkm.qraft.ui.theme.AppMotion.rubberBand(overshoot = 1000f, dimension = 300f)
+        assertTrue("Rubber banding resists large overscroll strictly below asymptote", rubberLarge < 300f && rubberLarge > rubberNearZero)
+        assertTrue("Rubber banding preserves negative sign", com.hkm.qraft.ui.theme.AppMotion.rubberBand(-80f, 300f) < 0f)
+
+        val registry = com.hkm.qraft.ui.theme.HeroBoundsRegistry()
+        val sampleRect = androidx.compose.ui.geometry.Rect(10f, 20f, 110f, 120f)
+        registry.register("hero_card_1", sampleRect, cornerRadiusDp = 24f)
+        val stored = registry.get("hero_card_1")
+        assertEquals(sampleRect, stored?.rect)
+        assertEquals(24f, stored?.cornerRadiusDp)
+    }
 }

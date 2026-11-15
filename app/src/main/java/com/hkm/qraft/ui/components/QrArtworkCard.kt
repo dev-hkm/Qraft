@@ -44,8 +44,9 @@ import com.hkm.qraft.model.*
 import com.hkm.qraft.qr.BarcodeEngine
 import com.hkm.qraft.qr.LogoCatalog
 import com.hkm.qraft.qr.QrEngine
-import com.hkm.qraft.ui.theme.AppleSprings
+import com.hkm.qraft.ui.theme.AppMotion
 import com.hkm.qraft.ui.theme.QraftThemeTokens
+import com.hkm.qraft.ui.theme.rememberReduceMotion
 import io.github.alexzhirkevich.qrose.QrCodePainter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -636,11 +637,10 @@ private fun QrCoreBox(
             }
         }
 
+        val reduceMotion = rememberReduceMotion()
         AnimatedContent(
             targetState = qrPainter,
-            transitionSpec = {
-                (fadeIn() + scaleIn(initialScale = 0.97f)).togetherWith(fadeOut() + scaleOut(targetScale = 0.98f))
-            },
+            transitionSpec = { AppMotion.tabTransform(reduceMotion) },
             label = "qrMorph"
         ) { painter ->
             Image(

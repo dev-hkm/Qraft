@@ -2,6 +2,7 @@ package com.hkm.qraft.ui.screens
 
 import android.net.Uri
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -37,20 +38,31 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import java.util.Locale
 import com.hkm.qraft.StudioDraftState
 import com.hkm.qraft.data.PresetCatalog
 import com.hkm.qraft.model.*
 import com.hkm.qraft.ui.components.*
-import com.hkm.qraft.ui.theme.AppleSprings
+import com.hkm.qraft.ui.theme.AppMotion
+import com.hkm.qraft.ui.theme.AppleAnimatedSwap
+import com.hkm.qraft.ui.theme.AppleProgressiveEdgeFrost
+import com.hkm.qraft.ui.theme.EdgeFrostDirection
 import com.hkm.qraft.ui.theme.QraftThemeTokens
-import com.hkm.qraft.ui.theme.appleBounceClick
+import com.hkm.qraft.ui.theme.appleHazeSource
+import com.hkm.qraft.ui.theme.appleLiquidRefraction
+import com.hkm.qraft.ui.theme.applePressable
+import com.hkm.qraft.ui.theme.rememberReduceMotion
+import dev.chrisbanes.haze.rememberHazeState
 
 enum class StudioTab(val label: String, val icon: ImageVector) {
     CONTENT("Content", Icons.Rounded.EditNote),
@@ -92,20 +104,24 @@ fun StudioScreen(
     onOpenFullscreen: () -> Unit
 ) {
     val colors = QraftThemeTokens.colors
+    val reduceMotion = rememberReduceMotion()
     var activeTab by remember { mutableStateOf(StudioTab.CONTENT) }
     var previewCompact by remember { mutableStateOf(false) }
     val editorScrollState = rememberScrollState()
+    val editorHazeState = rememberHazeState()
     val editorScrolled by remember { derivedStateOf { editorScrollState.value > 24 } }
     val effectiveCompact = previewCompact || editorScrolled
     val isBarcodeMode = draft.codeKind == CodeKind.BARCODE
+
     val animatedViewportSize by animateDpAsState(
         targetValue = if (previewCompact) 84.dp else if (editorScrolled) 118.dp else 156.dp,
-        animationSpec = AppleSprings.snappy(),
+        animationSpec = AppMotion.layoutSpring(),
         label = "previewViewportSize"
     )
     LaunchedEffect(activeTab, isBarcodeMode) {
         editorScrollState.scrollTo(0)
     }
+
     val exportResLabel = remember(draft.codeKind, draft.design.exportSizePx, draft.barcode.exportWidthPx) {
         val px = if (draft.codeKind == CodeKind.BARCODE) draft.barcode.exportWidthPx else draft.design.exportSizePx
         when {
@@ -115,42 +131,40 @@ fun StudioScreen(
             else -> "Export"
         }
     }
+
     var tiltTargetX by remember { mutableFloatStateOf(0f) }
     var tiltTargetY by remember { mutableFloatStateOf(0f) }
     val animTiltX by animateFloatAsState(
-        targetValue = tiltTargetX,
-        animationSpec = AppleSprings.TactileBounce,
+        targetValue = if (reduceMotion) 0f else tiltTargetX,
+        animationSpec = AppMotion.fluidSpring(),
         label = "previewTiltX"
     )
     val animTiltY by animateFloatAsState(
-        targetValue = tiltTargetY,
-        animationSpec = AppleSprings.TactileBounce,
+        targetValue = if (reduceMotion) 0f else tiltTargetY,
+        animationSpec = AppMotion.fluidSpring(),
         label = "previewTiltY"
     )
-    val densityPx = LocalDensity.current.density
+    val density = LocalDensity.current
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(colors.background)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-        ) {
+        Column(modifier = Modifier.fillMaxSize()) {
             // Fixed Top Header Bar with Undo/Redo & Mode
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 QraftHeaderCircleButton(
                     icon = Icons.Rounded.ArrowBackIosNew,
                     contentDescription = "Back",
-                    size = 36.dp,
+                    size = 38.dp,
                     onClick = onBack
                 )
 
@@ -172,7 +186,7 @@ fun StudioScreen(
                         } else {
                             "${draft.type.shortCode} • ${draft.design.exportSizePx}px"
                         },
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
                         color = colors.textSecondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -186,7 +200,7 @@ fun StudioScreen(
                         size = 34.dp,
                         enabled = canUndo,
                         contentColor = if (canUndo) colors.textPrimary else colors.textTertiary,
-                        modifier = Modifier.alpha(if (canUndo) 1f else 0.45f),
+                        modifier = Modifier.alpha(if (canUndo) 1f else 0.42f),
                         onClick = onUndo
                     )
 
@@ -196,7 +210,7 @@ fun StudioScreen(
                         size = 34.dp,
                         enabled = canRedo,
                         contentColor = if (canRedo) colors.textPrimary else colors.textTertiary,
-                        modifier = Modifier.alpha(if (canRedo) 1f else 0.45f),
+                        modifier = Modifier.alpha(if (canRedo) 1f else 0.42f),
                         onClick = onRedo
                     )
 
@@ -218,51 +232,21 @@ fun StudioScreen(
                 )
             }
 
-            // QR Code / Barcode Mode Switcher Pill Row
-            Row(
+            // Gliding Apple Segmented Mode Control (QR Code / Barcode)
+            AppleSegmentedControl(
+                options = listOf("QR Code", "Barcode"),
+                selectedIndex = if (isBarcodeMode) 1 else 0,
+                icons = listOf(Icons.Rounded.QrCode2, Icons.Rounded.ViewWeek),
+                height = 44.dp,
+                onSelect = { idx ->
+                    onCodeKindChange(if (idx == 0) CodeKind.QR else CodeKind.BARCODE)
+                },
                 modifier = Modifier
-                    .fillMaxWidth()
                     .padding(horizontal = 16.dp)
                     .padding(bottom = 10.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(colors.surfaceMuted)
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                listOf(
-                    Triple(CodeKind.QR, "QR Code", Icons.Rounded.QrCode2),
-                    Triple(CodeKind.BARCODE, "Barcode", Icons.Rounded.ViewWeek)
-                ).forEach { (kind, label, icon) ->
-                    val selected = draft.codeKind == kind
-                    Row(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(if (selected) colors.activePillBg else Color.Transparent)
-                            .appleBounceClick { onCodeKindChange(kind) }
-                            .padding(vertical = 8.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = null,
-                            tint = if (selected) colors.activePillContent else colors.textSecondary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (selected) colors.activePillContent else colors.textSecondary,
-                            maxLines = 1
-                        )
-                    }
-                }
-            }
+            )
 
-            // Live Preview Card (Tap for Fullscreen, Save & Export unified CTAs)
+            // Live Preview Stage Card (Tap for Fullscreen, Interactive 3D tilt, Smooth collapse)
             Surface(
                 shape = RoundedCornerShape(24.dp),
                 color = colors.surface,
@@ -285,22 +269,24 @@ fun StudioScreen(
                     ) {
                         Box(
                             modifier = Modifier
-                                .pointerInput(Unit) {
-                                    detectDragGestures(
-                                        onDragEnd = { tiltTargetX = 0f; tiltTargetY = 0f },
-                                        onDragCancel = { tiltTargetX = 0f; tiltTargetY = 0f }
-                                    ) { change, dragAmount ->
-                                        change.consume()
-                                        tiltTargetY = (tiltTargetY + dragAmount.x * 0.08f).coerceIn(-14f, 14f)
-                                        tiltTargetX = (tiltTargetX - dragAmount.y * 0.08f).coerceIn(-14f, 14f)
+                                .pointerInput(reduceMotion) {
+                                    if (!reduceMotion) {
+                                        detectDragGestures(
+                                            onDragEnd = { tiltTargetX = 0f; tiltTargetY = 0f },
+                                            onDragCancel = { tiltTargetX = 0f; tiltTargetY = 0f }
+                                        ) { change, dragAmount ->
+                                            change.consume()
+                                            tiltTargetY = (tiltTargetY + dragAmount.x * 0.08f).coerceIn(-12f, 12f)
+                                            tiltTargetX = (tiltTargetX - dragAmount.y * 0.08f).coerceIn(-12f, 12f)
+                                        }
                                     }
                                 }
                                 .graphicsLayer {
                                     rotationX = animTiltX
                                     rotationY = animTiltY
-                                    cameraDistance = 14f * densityPx
+                                    cameraDistance = 14f * density.density
                                 }
-                                .appleBounceClick(scalePressed = 0.97f) { onOpenFullscreen() }
+                                .applePressable(pressedScale = 0.97f) { onOpenFullscreen() }
                         ) {
                             if (isBarcodeMode) {
                                 BarcodeArtworkPreview(
@@ -316,12 +302,12 @@ fun StudioScreen(
                                     showCheckerboardForTransparent = true
                                 )
                             }
-                            val glintStrength = ((abs(animTiltX) + abs(animTiltY)) / 24f).coerceIn(0f, 1f)
+                            val glintStrength = ((abs(animTiltX) + abs(animTiltY)) / 22f).coerceIn(0f, 1f)
                             if (glintStrength > 0.02f) {
                                 Box(
                                     modifier = Modifier
                                         .matchParentSize()
-                                        .clip(RoundedCornerShape(22.dp))
+                                        .clip(RoundedCornerShape(18.dp))
                                         .background(
                                             Brush.linearGradient(
                                                 colors = listOf(
@@ -359,7 +345,6 @@ fun StudioScreen(
                         }
                     }
 
-                    // Controls + Save / Export bar
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -390,7 +375,11 @@ fun StudioScreen(
                         }
                     }
 
-                    if (!effectiveCompact && !isBarcodeMode) {
+                    AnimatedVisibility(
+                        visible = !effectiveCompact && !isBarcodeMode,
+                        enter = AppMotion.softExpandEnter,
+                        exit = AppMotion.softExpandExit
+                    ) {
                         QrTelemetryGaugeRow(
                             charCount = draft.encodedPayload.length,
                             matrixSize = scannability.matrixSize,
@@ -411,7 +400,7 @@ fun StudioScreen(
                             },
                             variant = QraftButtonVariant.TONAL,
                             leadingIcon = Icons.Rounded.BookmarkAdded,
-                            height = 42.dp,
+                            height = 44.dp,
                             modifier = Modifier.weight(1f),
                             onClick = onSaveToLibrary
                         )
@@ -419,13 +408,17 @@ fun StudioScreen(
                             text = exportResLabel,
                             variant = QraftButtonVariant.PRIMARY,
                             leadingIcon = Icons.Rounded.IosShare,
-                            height = 42.dp,
+                            height = 44.dp,
                             modifier = Modifier.weight(1.1f),
                             onClick = onOpenExport
                         )
                     }
 
-                    if (!scannability.warningMessage.isNullOrBlank()) {
+                    AnimatedVisibility(
+                        visible = !scannability.warningMessage.isNullOrBlank(),
+                        enter = AppMotion.softExpandEnter,
+                        exit = AppMotion.softExpandExit
+                    ) {
                         Surface(
                             shape = RoundedCornerShape(14.dp),
                             color = colors.warningBg,
@@ -437,23 +430,26 @@ fun StudioScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    text = scannability.warningMessage,
+                                    text = scannability.warningMessage.orEmpty(),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = colors.warningFg,
                                     modifier = Modifier.weight(1f).padding(end = 8.dp)
                                 )
                                 if (!isBarcodeMode) {
-                                    Text(
-                                        text = "Auto-Fix",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = colors.espressoAccent,
+                                    Box(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(50))
                                             .background(colors.surface)
-                                            .appleBounceClick { onAutoFixScannability() }
-                                            .padding(horizontal = 10.dp, vertical = 4.dp)
-                                    )
+                                            .applePressable { onAutoFixScannability() }
+                                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                                    ) {
+                                        Text(
+                                            text = "Auto-Fix",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = colors.espressoAccent
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -464,149 +460,241 @@ fun StudioScreen(
             Spacer(Modifier.height(10.dp))
 
             if (!isBarcodeMode) {
-                // Pinned Monochrome Segmented Tab Strip
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    StudioTab.entries.forEach { tab ->
-                        val selected = tab == activeTab
-                        val bg by animateColorAsState(
-                            targetValue = if (selected) colors.activePillBg else colors.surface,
-                            animationSpec = AppleSprings.snappy(),
-                            label = "tabBg"
-                        )
-                        val fg by animateColorAsState(
-                            targetValue = if (selected) colors.activePillContent else colors.textPrimary,
-                            animationSpec = AppleSprings.snappy(),
-                            label = "tabFg"
-                        )
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(bg)
-                                .border(1.dp, if (selected) bg else colors.cardBorder, RoundedCornerShape(50))
-                                .appleBounceClick { activeTab = tab }
-                                .padding(horizontal = 14.dp, vertical = 9.dp)
-                        ) {
-                            Icon(tab.icon, contentDescription = null, tint = fg, modifier = Modifier.size(16.dp))
-                            Text(
-                                text = tab.label,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                color = fg
-                            )
-                        }
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-                HorizontalDivider(
-                    color = colors.cardBorder.copy(alpha = 0.55f),
-                    thickness = 0.8.dp
+                StudioGlidingTabStrip(
+                    activeTab = activeTab,
+                    onSelectTab = { activeTab = it }
                 )
+                Spacer(Modifier.height(6.dp))
             }
 
-            // Independently Scrollable Editor Workspace (keeps live preview pinned above)
-            Column(
+            // Scrollable Editor Workspace under Progressive Edge Frost
+            Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .verticalScroll(editorScrollState)
-                    .navigationBarsPadding()
-                    .imePadding()
-                    .padding(top = 10.dp, bottom = 32.dp)
             ) {
-                if (isBarcodeMode) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        QraftTextField(
-                            value = draft.title,
-                            onValueChange = onTitleChange,
-                            label = "Label / Title (optional)",
-                            placeholder = "e.g. Store SKU 893"
-                        )
-                        BarcodeEditorPanel(
-                            spec = draft.barcode,
-                            onSpecChange = onBarcodeChange
-                        )
-                    }
-                } else {
-                    // Tab Body
-                    AnimatedContent(
-                        targetState = activeTab,
-                        transitionSpec = {
-                            val forward = targetState.ordinal >= initialState.ordinal
-                            (slideInHorizontally(tween(240)) { if (forward) it / 8 else -it / 8 } + fadeIn(tween(200)))
-                                .togetherWith(slideOutHorizontally(tween(180)) { if (forward) -it / 8 else it / 8 } + fadeOut(tween(160)))
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = "studioTabBody"
-                    ) { tab ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .appleHazeSource(editorHazeState)
+                        .verticalScroll(editorScrollState)
+                        .navigationBarsPadding()
+                        .imePadding()
+                        .padding(top = 10.dp, bottom = 36.dp)
+                ) {
+                    if (isBarcodeMode) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 4.dp)
+                                .padding(horizontal = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
-                            when (tab) {
-                                StudioTab.CONTENT -> ContentEditorTab(
-                                    title = draft.title,
-                                    type = draft.type,
-                                    fields = draft.payload,
-                                    encodedPayload = draft.encodedPayload,
-                                    onTitleChange = onTitleChange,
-                                    onTypeChange = onTypeChange,
-                                    onFieldsChange = onFieldsChange
-                                )
+                            QraftTextField(
+                                value = draft.title,
+                                onValueChange = onTitleChange,
+                                label = "Label / Title (optional)",
+                                placeholder = "e.g. Store SKU 893"
+                            )
+                            BarcodeEditorPanel(
+                                spec = draft.barcode,
+                                onSpecChange = onBarcodeChange
+                            )
+                        }
+                    } else {
+                        AnimatedContent(
+                            targetState = activeTab,
+                            transitionSpec = {
+                                if (reduceMotion) {
+                                    AppMotion.softCrossDissolve(160)
+                                } else {
+                                    val forward = targetState.ordinal >= initialState.ordinal
+                                    (slideInHorizontally(tween(260, easing = AppMotion.AppleSilk)) {
+                                        if (forward) it / 10 else -it / 10
+                                    } + fadeIn(tween(220, easing = AppMotion.AppleEaseOut))) togetherWith
+                                        (slideOutHorizontally(tween(170, easing = AppMotion.AppleEaseOut)) {
+                                            if (forward) -it / 10 else it / 10
+                                        } + fadeOut(tween(140, easing = AppMotion.AppleEaseOut)))
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = "studioTabBody"
+                        ) { tab ->
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 4.dp)
+                            ) {
+                                when (tab) {
+                                    StudioTab.CONTENT -> ContentEditorTab(
+                                        title = draft.title,
+                                        type = draft.type,
+                                        fields = draft.payload,
+                                        encodedPayload = draft.encodedPayload,
+                                        onTitleChange = onTitleChange,
+                                        onTypeChange = onTypeChange,
+                                        onFieldsChange = onFieldsChange
+                                    )
 
-                                StudioTab.PRESETS -> PresetsEditorTab(
-                                    builtInPresets = PresetCatalog.builtInPresets,
-                                    customPresets = customPresets,
-                                    currentDesign = draft.design,
-                                    onApplyPreset = onApplyPreset,
-                                    onSaveCurrentAsPreset = onSaveCustomPreset,
-                                    onDeleteCustomPreset = onDeleteCustomPreset
-                                )
+                                    StudioTab.PRESETS -> PresetsEditorTab(
+                                        builtInPresets = PresetCatalog.builtInPresets,
+                                        customPresets = customPresets,
+                                        currentDesign = draft.design,
+                                        onApplyPreset = onApplyPreset,
+                                        onSaveCurrentAsPreset = onSaveCustomPreset,
+                                        onDeleteCustomPreset = onDeleteCustomPreset
+                                    )
 
-                                StudioTab.SHAPES -> ShapesEditorTab(
-                                    design = draft.design,
-                                    onDesignChange = onDesignChange
-                                )
+                                    StudioTab.SHAPES -> ShapesEditorTab(
+                                        design = draft.design,
+                                        onDesignChange = onDesignChange
+                                    )
 
-                                StudioTab.COLORS -> ColorsEditorTab(
-                                    design = draft.design,
-                                    onDesignChange = onDesignChange,
-                                    onPickBackgroundPhoto = onPickBackgroundPhoto,
-                                    onExtractColorsFromPhoto = { onExtractBrandColors?.invoke(false) }
-                                )
+                                    StudioTab.COLORS -> ColorsEditorTab(
+                                        design = draft.design,
+                                        onDesignChange = onDesignChange,
+                                        onPickBackgroundPhoto = onPickBackgroundPhoto,
+                                        onExtractColorsFromPhoto = { onExtractBrandColors?.invoke(false) }
+                                    )
 
-                                StudioTab.LOGO -> LogoEditorTab(
-                                    design = draft.design,
-                                    onDesignChange = onDesignChange,
-                                    onPickLogoPhoto = onPickLogoPhoto,
-                                    onExtractColorsFromLogo = { onExtractBrandColors?.invoke(true) }
-                                )
+                                    StudioTab.LOGO -> LogoEditorTab(
+                                        design = draft.design,
+                                        onDesignChange = onDesignChange,
+                                        onPickLogoPhoto = onPickLogoPhoto,
+                                        onExtractColorsFromLogo = { onExtractBrandColors?.invoke(true) }
+                                    )
 
-                                StudioTab.FRAME -> FrameAndProTab(
-                                    design = draft.design,
-                                    onDesignChange = onDesignChange
-                                )
+                                    StudioTab.FRAME -> FrameAndProTab(
+                                        design = draft.design,
+                                        onDesignChange = onDesignChange
+                                    )
+                                }
                             }
                         }
                     }
                 }
+
+                AppleProgressiveEdgeFrost(
+                    hazeState = editorHazeState,
+                    direction = EdgeFrostDirection.Top,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .height(if (editorScrolled) 16.dp else 4.dp)
+                ) {}
             }
         }
 
         QraftStatusBarScrim(modifier = Modifier.align(Alignment.TopCenter))
+    }
+}
+
+/**
+ * Scrollable gliding pill tab strip for Studio tabs: a single liquid pill tracks
+ * the active tab's exact bounds using [AppMotion.layoutSpring] and auto-scrolls it into view.
+ */
+@Composable
+private fun StudioGlidingTabStrip(
+    activeTab: StudioTab,
+    onSelectTab: (StudioTab) -> Unit
+) {
+    val colors = QraftThemeTokens.colors
+    val reduceMotion = rememberReduceMotion()
+    val scrollState = rememberScrollState()
+    val density = LocalDensity.current
+
+    val tabPositions = remember { mutableStateMapOf<StudioTab, Pair<Float, Float>>() }
+    val activeBounds = tabPositions[activeTab]
+
+    val targetX = activeBounds?.first ?: 0f
+    val targetW = activeBounds?.second ?: 0f
+
+    val indicatorX by animateFloatAsState(
+        targetValue = targetX,
+        animationSpec = AppMotion.layoutSpring(),
+        label = "tabIndX"
+    )
+    val indicatorW by animateFloatAsState(
+        targetValue = targetW,
+        animationSpec = AppMotion.layoutSpring(),
+        label = "tabIndW"
+    )
+
+    LaunchedEffect(activeTab, activeBounds) {
+        if (activeBounds != null) {
+            val targetCenter = (activeBounds.first + activeBounds.second / 2f).roundToInt()
+            val viewportHalf = (scrollState.viewportSize / 2)
+            if (viewportHalf > 0) {
+                scrollState.animateScrollTo(
+                    value = (targetCenter - viewportHalf).coerceIn(0, scrollState.maxValue),
+                    animationSpec = AppMotion.fluidSpring()
+                )
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(scrollState)
+            .padding(horizontal = 16.dp)
+    ) {
+        // Gliding Liquid Indicator Pill underneath labels
+        val drawX = if (reduceMotion) targetX else indicatorX
+        val drawW = if (reduceMotion) targetW else indicatorW
+        if (drawW > 1f) {
+            val widthDp = with(density) { drawW.toDp() }
+            Box(
+                modifier = Modifier
+                    .offset { IntOffset(drawX.roundToInt(), 0) }
+                    .width(widthDp)
+                    .height(38.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(colors.activePillBg)
+                    .appleLiquidRefraction(
+                        cornerRadius = 19.dp,
+                        refractionStrength = 4f,
+                        specularStrength = 0.16f
+                    )
+            )
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StudioTab.entries.forEach { tab ->
+                val selected = tab == activeTab
+                val fg by animateColorAsState(
+                    targetValue = if (selected) colors.activePillContent else colors.textPrimary,
+                    animationSpec = AppMotion.snappySpring(),
+                    label = "tabFg_${tab.name}"
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier
+                        .height(38.dp)
+                        .onGloballyPositioned { coords ->
+                            tabPositions[tab] = coords.positionInParent().x to coords.size.width.toFloat()
+                        }
+                        .clip(RoundedCornerShape(50))
+                        .then(
+                            if (!selected) {
+                                Modifier.border(1.dp, colors.cardBorder, RoundedCornerShape(50))
+                            } else {
+                                Modifier
+                            }
+                        )
+                        .applePressable(pressedScale = 0.95f) { onSelectTab(tab) }
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                ) {
+                    Icon(tab.icon, contentDescription = null, tint = fg, modifier = Modifier.size(16.dp))
+                    Text(
+                        text = tab.label,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                        color = fg,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -618,39 +706,60 @@ private fun ScannabilityStatusPill(
     modifier: Modifier = Modifier
 ) {
     val colors = QraftThemeTokens.colors
-    val bg = when {
+    val targetBg = when {
         isVerifying -> colors.surfaceMuted
         report.isScannable -> colors.successBg
         else -> colors.warningBg
     }
-    val fg = when {
+    val targetFg = when {
         isVerifying -> colors.textSecondary
         report.isScannable -> colors.successFg
         else -> colors.warningFg
     }
+    val bg by animateColorAsState(targetBg, AppMotion.snappySpring(), label = "scanBg")
+    val fg by animateColorAsState(targetFg, AppMotion.snappySpring(), label = "scanFg")
+
+    val pillState = when {
+        isVerifying -> 0
+        report.isScannable -> 1
+        else -> 2
+    }
+
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         modifier = modifier
+            .defaultMinSize(minHeight = 32.dp)
             .clip(RoundedCornerShape(50))
             .background(bg)
-            .appleBounceClick(enabled = !report.isScannable) { onAutoFix() }
-            .padding(horizontal = 10.dp, vertical = 5.dp)
+            .applePressable(enabled = !report.isScannable && !isVerifying) { onAutoFix() }
+            .padding(horizontal = 11.dp, vertical = 5.dp)
     ) {
-        if (isVerifying) {
-            CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.6.dp, color = fg)
-        } else {
-            Icon(
-                imageVector = if (report.isScannable) Icons.Rounded.Verified else Icons.Rounded.WarningAmber,
-                contentDescription = null,
-                tint = fg,
-                modifier = Modifier.size(14.dp)
-            )
+        AppleAnimatedSwap(targetState = pillState) { st ->
+            when (st) {
+                0 -> CircularProgressIndicator(
+                    modifier = Modifier.size(12.dp),
+                    strokeWidth = 1.6.dp,
+                    color = fg
+                )
+                1 -> Icon(
+                    imageVector = Icons.Rounded.Verified,
+                    contentDescription = null,
+                    tint = fg,
+                    modifier = Modifier.size(14.dp)
+                )
+                else -> Icon(
+                    imageVector = Icons.Rounded.WarningAmber,
+                    contentDescription = null,
+                    tint = fg,
+                    modifier = Modifier.size(14.dp)
+                )
+            }
         }
         Text(
-            text = when {
-                isVerifying -> "Checking…"
-                report.isScannable -> "Scannable"
+            text = when (pillState) {
+                0 -> "Checking…"
+                1 -> "Scannable"
                 else -> "Low Scan • Fix"
             },
             style = MaterialTheme.typography.labelSmall,
@@ -673,7 +782,7 @@ private fun QrTelemetryGaugeRow(
     val targetDensity = (charCount / 220f).coerceIn(0.08f, 1f)
     val densityProgress by animateFloatAsState(
         targetValue = targetDensity,
-        animationSpec = AppleSprings.Smooth,
+        animationSpec = AppMotion.gentleSpring(),
         label = "densityBar"
     )
     val contrastColor = when {
@@ -692,7 +801,7 @@ private fun QrTelemetryGaugeRow(
     ) {
         Text(
             text = "$charCount ch • ${matrixSize}×$matrixSize • $effectiveEcc",
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
             color = colors.textSecondary
         )
         Box(
@@ -712,7 +821,7 @@ private fun QrTelemetryGaugeRow(
         }
         Text(
             text = "${String.format(Locale.US, "%.1f", contrastRatio)}:1",
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
             fontWeight = FontWeight.Bold,
             color = contrastColor
         )
@@ -730,9 +839,10 @@ private fun SmallRoundAction(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         modifier = Modifier
+            .defaultMinSize(minHeight = 32.dp)
             .clip(RoundedCornerShape(50))
             .background(colors.surfaceMuted)
-            .appleBounceClick { onClick() }
+            .applePressable { onClick() }
             .padding(horizontal = 10.dp, vertical = 5.dp)
     ) {
         Icon(icon, contentDescription = label, tint = colors.textPrimary, modifier = Modifier.size(15.dp))

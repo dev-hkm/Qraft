@@ -1,25 +1,22 @@
 package com.hkm.qraft.ui.screens
 
-import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -29,11 +26,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -44,12 +39,23 @@ import com.hkm.qraft.model.QrCreationItem
 import com.hkm.qraft.model.ThemeMode
 import com.hkm.qraft.qr.QrPayloadEncoder
 import com.hkm.qraft.ui.components.HeroQrArtworkIllustration
-import com.hkm.qraft.ui.components.QraftStatusBarScrim
+import com.hkm.qraft.ui.components.QraftHeaderCircleButton
+import com.hkm.qraft.ui.components.QraftPillButton
+import com.hkm.qraft.ui.components.QraftButtonVariant
 import com.hkm.qraft.ui.components.iconForContentType
-import com.hkm.qraft.ui.theme.AppleSprings
+import com.hkm.qraft.ui.theme.AppMotion
+import com.hkm.qraft.ui.theme.AppleGlassSurface
+import com.hkm.qraft.ui.theme.AppleGlassVariant
+import com.hkm.qraft.ui.theme.AppleOdometerNumber
+import com.hkm.qraft.ui.theme.AppleProgressiveEdgeFrost
+import com.hkm.qraft.ui.theme.EdgeFrostDirection
 import com.hkm.qraft.ui.theme.QraftThemeTokens
-import com.hkm.qraft.ui.theme.StaggeredReveal
-import com.hkm.qraft.ui.theme.appleBounceClick
+import com.hkm.qraft.ui.theme.appleEntrance
+import com.hkm.qraft.ui.theme.appleHazeSource
+import com.hkm.qraft.ui.theme.applePressable
+import com.hkm.qraft.ui.theme.heroSource
+import com.hkm.qraft.ui.theme.rememberReduceMotion
+import dev.chrisbanes.haze.rememberHazeState
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -69,6 +75,8 @@ private val homeStripOptions = listOf(
     StripFilterOption(QrContentType.PAYMENT, "PAY"),
     StripFilterOption(QrContentType.SOCIAL, "SOC")
 )
+
+private val AmbientCosineEasing = CubicBezierEasing(0.45f, 0.05f, 0.55f, 0.95f)
 
 @Composable
 fun HomeScreen(
@@ -91,6 +99,16 @@ fun HomeScreen(
     onImportQr: () -> Unit = {}
 ) {
     val colors = QraftThemeTokens.colors
+    val reduceMotion = rememberReduceMotion()
+    val hazeState = rememberHazeState()
+    val listState = rememberLazyListState()
+
+    val isScrolled by remember {
+        derivedStateOf {
+            listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 36
+        }
+    }
+
     val activeItems = remember(items) { items.filterNot { it.isArchived } }
     val filteredItems = remember(activeItems, selectedCategory) {
         if (selectedCategory == null) activeItems else activeItems.filter { it.type == selectedCategory }
@@ -116,331 +134,359 @@ fun HomeScreen(
             .background(colors.background)
     ) {
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+            state = listState,
+            modifier = Modifier
+                .fillMaxSize()
+                .appleHazeSource(hazeState),
             contentPadding = PaddingValues(
                 start = 20.dp,
                 end = 20.dp,
                 top = 8.dp,
-                bottom = 112.dp
+                bottom = 116.dp
             ),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // 1. Tonser Scrolling Header ("Morning, Creator" + date + Scan / Theme / Preferences)
-            item {
-                StaggeredReveal(index = 0) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .statusBarsPadding()
-                            .padding(top = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
+            // 1. Scroll-Linked Header ("Morning, Creator" + Odometer count + Glass utility pills)
+            item(key = "home_header") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(top = 6.dp)
+                        .graphicsLayer {
+                            if (!reduceMotion && listState.firstVisibleItemIndex == 0) {
+                                val off = listState.firstVisibleItemScrollOffset.toFloat()
+                                val frac = (off / 160f).coerceIn(0f, 1f)
+                                alpha = 1f - frac * 0.45f
+                                translationY = -off * 0.14f
+                            }
+                        }
+                        .appleEntrance(0, reduceMotion = reduceMotion),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = greeting,
+                            style = MaterialTheme.typography.displaySmall,
+                            color = colors.textPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = greeting,
-                                style = MaterialTheme.typography.displaySmall,
-                                color = colors.textPrimary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                text = "$formattedDate • ${activeItems.size} codes",
+                                text = "$formattedDate • ",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = colors.textSecondary,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
                             )
-                        }
-
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // Live Scanner quick button
-                            Surface(
-                                shape = CircleShape,
-                                color = colors.surface,
-                                border = BorderStroke(1.dp, colors.cardBorder),
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .appleBounceClick { onOpenScanner() }
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.QrCodeScanner,
-                                        contentDescription = "Live Scanner",
-                                        tint = colors.textPrimary,
-                                        modifier = Modifier.size(19.dp)
-                                    )
-                                }
-                            }
-
-                            // Dedicated Settings Screen button
-                            Surface(
-                                shape = CircleShape,
-                                color = colors.surface,
-                                border = BorderStroke(1.dp, colors.cardBorder),
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .appleBounceClick { onOpenSettings() }
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Settings,
-                                        contentDescription = "Settings",
-                                        tint = colors.textPrimary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 2. Responsive 7-Circle Category Strip (mirrors Mon 7 .. Sun 13 evenly with zero edge clipping)
-            item {
-                StaggeredReveal(index = 1) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        homeStripOptions.forEach { option ->
-                            val selected = selectedCategory == option.type
-                            val circleBg by animateColorAsState(
-                                targetValue = if (selected) colors.activePillBg else colors.surface,
-                                animationSpec = AppleSprings.snappy(),
-                                label = "stripBg"
-                            )
-                            val circleFg by animateColorAsState(
-                                targetValue = if (selected) colors.activePillContent else colors.textPrimary,
-                                animationSpec = AppleSprings.snappy(),
-                                label = "stripFg"
-                            )
-                            val scale by animateFloatAsState(
-                                targetValue = if (selected) 1.06f else 1f,
-                                animationSpec = AppleSprings.TactileBounce,
-                                label = "stripScale"
-                            )
-
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .graphicsLayer {
-                                        scaleX = scale
-                                        scaleY = scale
-                                    }
-                                    .appleBounceClick {
-                                        onSelectCategory(
-                                            if (selected && option.type != null) null else option.type
-                                        )
-                                    }
-                            ) {
-                                Text(
-                                    text = option.label,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (selected) colors.textPrimary else colors.textSecondary,
-                                    maxLines = 1
+                            AppleOdometerNumber(
+                                value = activeItems.size,
+                                suffix = if (activeItems.size == 1) " code" else " codes",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    color = colors.textSecondary,
+                                    fontWeight = FontWeight.Medium
                                 )
-                                Box(
-                                    modifier = Modifier
-                                        .sizeIn(minWidth = 38.dp, minHeight = 38.dp, maxWidth = 46.dp, maxHeight = 46.dp)
-                                        .fillMaxWidth()
-                                        .aspectRatio(1f)
-                                        .clip(CircleShape)
-                                        .background(circleBg)
-                                        .border(
-                                            width = 1.dp,
-                                            color = if (selected) colors.activePillBg else colors.cardBorder,
-                                            shape = CircleShape
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = option.type?.let { iconForContentType(it) } ?: Icons.Rounded.GridView,
-                                        contentDescription = option.label,
-                                        tint = circleFg,
-                                        modifier = Modifier.size(19.dp)
+                            )
+                        }
+                    }
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        QraftHeaderCircleButton(
+                            icon = Icons.Rounded.QrCodeScanner,
+                            contentDescription = "Live Scanner",
+                            size = 42.dp,
+                            onClick = onOpenScanner,
+                            modifier = Modifier.heroSource("hero_scanner", cornerRadiusDp = 21f)
+                        )
+                        QraftHeaderCircleButton(
+                            icon = Icons.Rounded.Settings,
+                            contentDescription = "Settings",
+                            size = 42.dp,
+                            onClick = onOpenSettings,
+                            modifier = Modifier.heroSource("hero_settings", cornerRadiusDp = 21f)
+                        )
+                    }
+                }
+            }
+
+            // 2. Responsive 7-Circle Category Strip (fluid spring without tacky bounce)
+            item(key = "home_strip") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .appleEntrance(1, reduceMotion = reduceMotion),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    homeStripOptions.forEach { option ->
+                        val selected = selectedCategory == option.type
+                        val circleBg by animateColorAsState(
+                            targetValue = if (selected) colors.activePillBg else colors.surface,
+                            animationSpec = AppMotion.snappySpring(),
+                            label = "stripBg"
+                        )
+                        val circleFg by animateColorAsState(
+                            targetValue = if (selected) colors.activePillContent else colors.textPrimary,
+                            animationSpec = AppMotion.snappySpring(),
+                            label = "stripFg"
+                        )
+                        val scale by animateFloatAsState(
+                            targetValue = if (selected) 1.045f else 1f,
+                            animationSpec = AppMotion.fluidSpring(),
+                            label = "stripScale"
+                        )
+
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .graphicsLayer {
+                                    scaleX = scale
+                                    scaleY = scale
+                                }
+                                .applePressable(pressedScale = 0.94f) {
+                                    onSelectCategory(
+                                        if (selected && option.type != null) null else option.type
                                     )
                                 }
+                        ) {
+                            Text(
+                                text = option.label,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (selected) colors.textPrimary else colors.textSecondary,
+                                maxLines = 1
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .sizeIn(minWidth = 38.dp, minHeight = 38.dp, maxWidth = 46.dp, maxHeight = 46.dp)
+                                    .fillMaxWidth()
+                                    .aspectRatio(1f)
+                                    .clip(CircleShape)
+                                    .background(circleBg)
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (selected) colors.activePillBg else colors.cardBorder,
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = option.type?.let { iconForContentType(it) } ?: Icons.Rounded.GridView,
+                                    contentDescription = option.label,
+                                    tint = circleFg,
+                                    modifier = Modifier.size(19.dp)
+                                )
                             }
                         }
                     }
                 }
             }
 
-            // 3. Peach Spotlight Hero Card (mirrors "Set the reminder" card!)
-            item {
-                StaggeredReveal(index = 2) {
+            // 3. Spotlight Hero Card with ambient cosine float + Hero Source Morph bounds
+            item(key = "home_hero") {
+                val floatY by if (reduceMotion) {
+                    remember { mutableFloatStateOf(0f) }
+                } else {
                     val infinite = rememberInfiniteTransition(label = "heroFloat")
-                    val floatY by infinite.animateFloat(
-                        initialValue = -3f,
-                        targetValue = 3f,
+                    infinite.animateFloat(
+                        initialValue = -2.5f,
+                        targetValue = 2.5f,
                         animationSpec = infiniteRepeatable(
-                            animation = tween(2200),
+                            animation = tween(2400, easing = AmbientCosineEasing),
                             repeatMode = RepeatMode.Reverse
                         ),
                         label = "heroFloatY"
                     )
-                    val targetType = selectedCategory ?: QrContentType.URL
+                }
+                val targetType = selectedCategory ?: QrContentType.URL
 
-                    Surface(
-                        shape = RoundedCornerShape(24.dp),
-                        color = colors.heroBannerBg,
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    color = colors.heroBannerBg,
+                    border = BorderStroke(1.dp, colors.cardBorder.copy(alpha = 0.7f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .appleEntrance(2, reduceMotion = reduceMotion)
+                        .heroSource("hero_type_${targetType.name}", cornerRadiusDp = 24f)
+                        .applePressable(pressedScale = 0.985f) { onOpenStudioNew(targetType) }
+                ) {
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .appleBounceClick(scalePressed = 0.985f) { onOpenStudioNew(targetType) }
+                            .padding(horizontal = 20.dp, vertical = 18.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(
+                        Column(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 20.dp, vertical = 18.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                .weight(1f)
+                                .padding(end = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .padding(end = 10.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            Text(
+                                text = if (selectedCategory == null) {
+                                    "Craft QR & Barcodes"
+                                } else {
+                                    "Create ${selectedCategory.title}"
+                                },
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontSize = 20.sp,
+                                color = colors.heroBannerTitle
+                            )
+                            Text(
+                                text = "Custom shapes, logos, optional frames, 8K UHD & vector SVG",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colors.heroBannerBody,
+                                lineHeight = 18.sp
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = if (selectedCategory == null) {
-                                        "Craft QR & Barcodes"
-                                    } else {
-                                        "Create ${selectedCategory.title}"
-                                    },
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    fontSize = 20.sp,
-                                    color = colors.heroBannerTitle
-                                )
-                                Text(
-                                    text = "Custom shapes, logos, optional frames, 8K UHD & vector SVG",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = colors.heroBannerBody,
-                                    lineHeight = 18.sp
-                                )
-                                Spacer(Modifier.height(4.dp))
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                Box(
+                                    modifier = Modifier
+                                        .defaultMinSize(minHeight = 40.dp)
+                                        .clip(RoundedCornerShape(50))
+                                        .background(colors.espressoAccent)
+                                        .applePressable { onOpenStudioNew(targetType) }
+                                        .padding(horizontal = 15.dp, vertical = 9.dp),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(50))
-                                            .background(colors.espressoAccent)
-                                            .appleBounceClick { onOpenStudioNew(targetType) }
-                                            .padding(horizontal = 13.dp, vertical = 8.dp)
-                                    ) {
-                                        Text(
-                                            text = "Studio",
-                                            style = MaterialTheme.typography.labelLarge,
-                                            color = colors.espressoAccentContent,
-                                            maxLines = 1,
-                                            softWrap = false
-                                        )
-                                    }
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(50))
-                                            .background(colors.surface)
-                                            .border(1.dp, colors.cardBorder, RoundedCornerShape(50))
-                                            .appleBounceClick { onOpenStudioNewBarcode() }
-                                            .padding(horizontal = 12.dp, vertical = 8.dp)
-                                    ) {
-                                        Text(
-                                            text = "Barcode",
-                                            style = MaterialTheme.typography.labelLarge,
-                                            color = colors.textPrimary,
-                                            maxLines = 1,
-                                            softWrap = false
-                                        )
-                                    }
+                                    Text(
+                                        text = "Studio",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = colors.espressoAccentContent,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .defaultMinSize(minHeight = 40.dp)
+                                        .heroSource("hero_barcode", cornerRadiusDp = 50f)
+                                        .clip(RoundedCornerShape(50))
+                                        .background(colors.surface)
+                                        .border(1.dp, colors.cardBorder, RoundedCornerShape(50))
+                                        .applePressable { onOpenStudioNewBarcode() }
+                                        .padding(horizontal = 14.dp, vertical = 9.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "Barcode",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = colors.textPrimary,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
                                 }
                             }
-
-                            HeroQrArtworkIllustration(
-                                modifier = Modifier
-                                    .size(92.dp)
-                                    .graphicsLayer { translationY = floatY }
-                            )
                         }
+
+                        HeroQrArtworkIllustration(
+                            modifier = Modifier
+                                .size(92.dp)
+                                .graphicsLayer { translationY = floatY.dp.toPx() * 0.4f }
+                        )
                     }
                 }
             }
 
-            // 4. Section Header ("Recent creations" + "Batch" + "See all")
-            item {
-                StaggeredReveal(index = 3) {
+            // 4. Recents Header ("Recents" + Remix / Batch / See all)
+            item(key = "home_recents_header") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .appleEntrance(3, reduceMotion = reduceMotion),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (selectedCategory == null) "Recents" else selectedCategory.title,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = colors.textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = if (selectedCategory == null) "Recents" else selectedCategory.title,
-                            style = MaterialTheme.typography.titleLarge,
-                            color = colors.textPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        Box(
+                            modifier = Modifier
+                                .defaultMinSize(minHeight = 36.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(colors.heroBannerBg)
+                                .applePressable { onImportQr() }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = "Remix",
                                 style = MaterialTheme.typography.labelLarge,
                                 color = colors.espressoAccent,
                                 maxLines = 1,
-                                softWrap = false,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(50))
-                                    .background(colors.heroBannerBg)
-                                    .appleBounceClick { onImportQr() }
-                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                                softWrap = false
                             )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .defaultMinSize(minHeight = 36.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(colors.surfaceMuted)
+                                .applePressable { onOpenBatch() }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
                             Text(
                                 text = "Batch",
                                 style = MaterialTheme.typography.labelLarge,
                                 color = colors.textSecondary,
                                 maxLines = 1,
-                                softWrap = false,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(50))
-                                    .background(colors.surfaceMuted)
-                                    .appleBounceClick { onOpenBatch() }
-                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                                softWrap = false
                             )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .defaultMinSize(minHeight = 36.dp)
+                                .heroSource("hero_library", cornerRadiusDp = 12f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .applePressable { onOpenLibrary() }
+                                .padding(horizontal = 6.dp, vertical = 6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
                             Text(
                                 text = "See all",
                                 style = MaterialTheme.typography.labelLarge,
                                 color = colors.espressoAccent,
                                 maxLines = 1,
-                                softWrap = false,
-                                modifier = Modifier
-                                    .appleBounceClick { onOpenLibrary() }
-                                    .padding(start = 2.dp, top = 4.dp, bottom = 4.dp)
+                                softWrap = false
                             )
                         }
                     }
                 }
             }
 
-            // 5. Timeline List Cards (mirrors the Daily routine cards!)
+            // 5. Timeline List Cards (Clean non-glass elevated cards + Hero Bounds Morph + Item flow compaction)
             if (filteredItems.isEmpty()) {
-                item {
+                item(key = "home_empty") {
                     Surface(
                         shape = RoundedCornerShape(22.dp),
                         color = colors.surface,
                         border = BorderStroke(1.dp, colors.cardBorder),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .appleEntrance(4, reduceMotion = reduceMotion)
                     ) {
                         Column(
                             modifier = Modifier
@@ -465,16 +511,12 @@ fun HomeScreen(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = colors.textSecondary
                             )
-                            Button(
-                                onClick = { onOpenStudioNew(selectedCategory ?: QrContentType.URL) },
-                                shape = RoundedCornerShape(50),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = colors.espressoAccent,
-                                    contentColor = colors.espressoAccentContent
-                                )
-                            ) {
-                                Text("Create Now")
-                            }
+                            QraftPillButton(
+                                text = "Create Now",
+                                variant = QraftButtonVariant.PRIMARY,
+                                height = 44.dp,
+                                onClick = { onOpenStudioNew(selectedCategory ?: QrContentType.URL) }
+                            )
                         }
                     }
                 }
@@ -484,7 +526,14 @@ fun HomeScreen(
                     items = visibleItems,
                     key = { _, item -> item.id }
                 ) { index, item ->
-                    StaggeredReveal(index = index + 4, key = item.id) {
+                    Box(
+                        modifier = Modifier
+                            .animateItem(
+                                fadeInSpec = AppMotion.snappySpring(),
+                                placementSpec = AppMotion.layoutSpring()
+                            )
+                            .appleEntrance(index + 4, reduceMotion = reduceMotion)
+                    ) {
                         QrTimelineRowCard(
                             item = item,
                             isFirst = index == 0,
@@ -498,34 +547,115 @@ fun HomeScreen(
             }
         }
 
-        // 6. Monochrome Circular '+' FAB
+        // Progressive Frosted Top Scrim + Sticky Compact Chrome when scrolled
+        AppleProgressiveEdgeFrost(
+            hazeState = hazeState,
+            direction = EdgeFrostDirection.Top,
+            modifier = Modifier.align(Alignment.TopCenter)
+        ) {
+            val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = statusTop + 18.dp)
+            ) {
+                AnimatedVisibility(
+                    visible = isScrolled,
+                    enter = AppMotion.floatingBarEnter,
+                    exit = AppMotion.floatingBarExit,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 20.dp, vertical = 6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        AppleGlassSurface(
+                            shape = RoundedCornerShape(50),
+                            cornerRadiusDp = 50.dp,
+                            variant = AppleGlassVariant.Regular,
+                            hazeState = hazeState,
+                            enableRefraction = true
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "Qraft",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = colors.textPrimary
+                                )
+                                AppleOdometerNumber(
+                                    value = activeItems.size,
+                                    suffix = " codes",
+                                    style = MaterialTheme.typography.labelSmall.copy(color = colors.textSecondary)
+                                )
+                            }
+                        }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            QraftHeaderCircleButton(
+                                icon = Icons.Rounded.QrCodeScanner,
+                                contentDescription = "Live Scanner",
+                                size = 40.dp,
+                                hazeState = hazeState,
+                                onClick = onOpenScanner
+                            )
+                            QraftHeaderCircleButton(
+                                icon = Icons.Rounded.Settings,
+                                contentDescription = "Settings",
+                                size = 40.dp,
+                                hazeState = hazeState,
+                                onClick = onOpenSettings
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 6. Apple Liquid Glass Floating '+' Action Disc (concentric 31.dp outer / 26.dp inner)
         Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .navigationBarsPadding()
                 .padding(end = 22.dp, bottom = 22.dp)
-                .size(62.dp)
-                .shadow(
-                    elevation = 10.dp,
-                    shape = CircleShape,
-                    ambientColor = colors.espressoAccent,
-                    spotColor = colors.espressoAccent
-                )
-                .clip(CircleShape)
-                .background(colors.espressoAccent)
-                .appleBounceClick(scalePressed = 0.91f) { onOpenCreatePicker() },
+                .heroSource("hero_create", cornerRadiusDp = 31f)
+                .applePressable(pressedScale = 0.90f) { onOpenCreatePicker() },
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = Icons.Rounded.Add,
-                contentDescription = "Create New Code",
-                tint = colors.espressoAccentContent,
-                modifier = Modifier.size(28.dp)
-            )
+            AppleGlassSurface(
+                modifier = Modifier.size(62.dp),
+                shape = CircleShape,
+                cornerRadiusDp = 31.dp,
+                variant = AppleGlassVariant.Regular,
+                hazeState = hazeState,
+                enableRefraction = true,
+                elevation = 12.dp
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(5.dp)
+                        .clip(CircleShape)
+                        .background(colors.espressoAccent),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Add,
+                        contentDescription = "Create New Code",
+                        tint = colors.espressoAccentContent,
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
+            }
         }
-
-        // Tonser top status bar feathered scrim
-        QraftStatusBarScrim(modifier = Modifier.align(Alignment.TopCenter))
     }
 }
 
@@ -556,10 +686,10 @@ fun QrTimelineRowCard(
             .height(IntrinsicSize.Min),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Left Timeline Dotted Rail + Status Dot (exact match to screenshot!)
+        // Left Timeline Dotted Rail + Status Dot (clean spring transition)
         Box(
             modifier = Modifier
-                .width(28.dp)
+                .width(30.dp)
                 .fillMaxHeight(),
             contentAlignment = Alignment.Center
         ) {
@@ -577,49 +707,59 @@ fun QrTimelineRowCard(
                 )
             }
 
-            // Orange filled checkmark circle for favorites/verified, clean outline otherwise
             val dotFilled = item.isFavorite
+            val dotBg by animateColorAsState(
+                targetValue = if (dotFilled) colors.timelineDotActive else colors.background,
+                animationSpec = AppMotion.snappySpring(),
+                label = "timelineDotBg"
+            )
             Box(
                 modifier = Modifier
-                    .size(20.dp)
-                    .clip(CircleShape)
-                    .background(if (dotFilled) colors.timelineDotActive else colors.background)
-                    .border(
-                        width = 1.6.dp,
-                        color = if (dotFilled) colors.timelineDotActive else colors.textTertiary,
-                        shape = CircleShape
-                    )
-                    .appleBounceClick { onDotClick() },
+                    .defaultMinSize(minWidth = 30.dp, minHeight = 36.dp)
+                    .applePressable(pressedScale = 0.85f) { onDotClick() },
                 contentAlignment = Alignment.Center
             ) {
-                if (dotFilled) {
-                    Icon(
-                        imageVector = Icons.Rounded.Check,
-                        contentDescription = "Favorite",
-                        tint = colors.espressoAccentContent,
-                        modifier = Modifier.size(13.dp)
-                    )
+                Box(
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(dotBg)
+                        .border(
+                            width = 1.6.dp,
+                            color = if (dotFilled) colors.timelineDotActive else colors.textTertiary,
+                            shape = CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (dotFilled) {
+                        Icon(
+                            imageVector = Icons.Rounded.Check,
+                            contentDescription = "Favorite",
+                            tint = colors.espressoAccentContent,
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
                 }
             }
         }
 
         Spacer(Modifier.width(8.dp))
 
-        // White Elevated Card
+        // Clean Elevated Card with Hero Source Morph bounds (20.dp outer -> 14.dp inner)
         Surface(
             shape = RoundedCornerShape(20.dp),
             color = colors.surface,
             border = BorderStroke(1.dp, colors.cardBorder),
             modifier = Modifier
                 .weight(1f)
-                .appleBounceClick { onCardClick() }
+                .heroSource("hero_card_${item.id}", cornerRadiusDp = 20f)
+                .applePressable { onCardClick() }
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Pastel / Monochrome Icon Container
                 Box(
                     modifier = Modifier
                         .size(46.dp)
@@ -635,7 +775,6 @@ fun QrTimelineRowCard(
                     )
                 }
 
-                // Title + Subtitle
                 Column(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(2.dp)
@@ -657,13 +796,13 @@ fun QrTimelineRowCard(
                     )
                 }
 
-                // Right Metadata + Quick Scan Present
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(3.dp),
                     modifier = Modifier
+                        .defaultMinSize(minWidth = 44.dp, minHeight = 44.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .appleBounceClick { onQuickPresent() }
+                        .applePressable(pressedScale = 0.92f) { onQuickPresent() }
                         .padding(horizontal = 6.dp, vertical = 4.dp)
                 ) {
                     Icon(

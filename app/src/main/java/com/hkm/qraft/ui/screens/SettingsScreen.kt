@@ -5,21 +5,21 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -61,7 +61,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -76,10 +75,15 @@ import com.hkm.qraft.ui.components.QraftHeaderCircleButton
 import com.hkm.qraft.ui.components.QraftModalSheet
 import com.hkm.qraft.ui.components.QraftPillButton
 import com.hkm.qraft.ui.components.QraftSegmentedPicker
-import com.hkm.qraft.ui.components.QraftStatusBarScrim
 import com.hkm.qraft.ui.components.QraftTextField
+import com.hkm.qraft.ui.theme.AppleProgressiveEdgeFrost
+import com.hkm.qraft.ui.theme.EdgeFrostDirection
 import com.hkm.qraft.ui.theme.QraftThemeTokens
-import com.hkm.qraft.ui.theme.appleBounceClick
+import com.hkm.qraft.ui.theme.appleEntrance
+import com.hkm.qraft.ui.theme.appleHazeSource
+import com.hkm.qraft.ui.theme.applePressable
+import com.hkm.qraft.ui.theme.rememberReduceMotion
+import dev.chrisbanes.haze.rememberHazeState
 
 @Composable
 fun SettingsScreen(
@@ -100,6 +104,8 @@ fun SettingsScreen(
     val colors = QraftThemeTokens.colors
     val context = LocalContext.current
     val scrollState = rememberScrollState()
+    val hazeState = rememberHazeState()
+    val reduceMotion = rememberReduceMotion()
 
     var showCreatorSheet by remember { mutableStateOf(false) }
     var showFormatSheet by remember { mutableStateOf(false) }
@@ -118,6 +124,7 @@ fun SettingsScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .appleHazeSource(hazeState)
                 .verticalScroll(scrollState)
                 .statusBarsPadding()
                 .navigationBarsPadding()
@@ -125,11 +132,12 @@ fun SettingsScreen(
                 .padding(top = 8.dp, bottom = 40.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // Tonser-style scrolling header
+            // Edge-to-edge Settings header
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .appleEntrance(0, reduceMotion = reduceMotion)
                     .padding(vertical = 4.dp)
             ) {
                 QraftHeaderCircleButton(
@@ -155,8 +163,8 @@ fun SettingsScreen(
                 }
             }
 
-            // 1. Appearance & Theme Mode (Tonser SettingsCard + SegmentedPicker)
-            Column(modifier = Modifier.fillMaxWidth()) {
+            // 1. Appearance & Theme Mode (Animated SettingsCard + Gliding AppleSegmentedControl)
+            Column(modifier = Modifier.fillMaxWidth().appleEntrance(1, reduceMotion = reduceMotion)) {
                 QraftSettingsSectionHeader("Preferences & Appearance")
                 Spacer(Modifier.height(8.dp))
                 QraftSettingsCard {
@@ -237,7 +245,7 @@ fun SettingsScreen(
             }
 
             // 2. Studio & Export Preferences
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth().appleEntrance(2, reduceMotion = reduceMotion)) {
                 QraftSettingsSectionHeader("Studio Preferences")
                 Spacer(Modifier.height(8.dp))
                 QraftSettingsCard {
@@ -321,7 +329,7 @@ fun SettingsScreen(
             }
 
             // 3. Storage & Backup
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth().appleEntrance(3, reduceMotion = reduceMotion)) {
                 QraftSettingsSectionHeader("Storage & Backup")
                 Spacer(Modifier.height(8.dp))
                 QraftSettingsCard {
@@ -354,7 +362,7 @@ fun SettingsScreen(
             }
 
             // 4. About Qraft
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth().appleEntrance(4, reduceMotion = reduceMotion)) {
                 QraftSettingsSectionHeader("About Qraft")
                 Spacer(Modifier.height(8.dp))
                 QraftSettingsCard {
@@ -390,7 +398,7 @@ fun SettingsScreen(
                     QraftSettingsRow(
                         icon = Icons.Rounded.QrCode2,
                         title = "Qraft QR Studio",
-                        subtitle = "Version 6.0.0 • Play Store Release Build",
+                        subtitle = "Version 7.0.0 • Apple Motion & Liquid Glass",
                         trailing = null,
                         onClick = {}
                     )
@@ -398,7 +406,14 @@ fun SettingsScreen(
             }
         }
 
-        QraftStatusBarScrim(modifier = Modifier.align(Alignment.TopCenter))
+        AppleProgressiveEdgeFrost(
+            hazeState = hazeState,
+            direction = com.hkm.qraft.ui.theme.EdgeFrostDirection.Top,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .height(androidx.compose.foundation.layout.WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 18.dp)
+        )
     }
 
     if (showCreatorSheet) {
@@ -488,7 +503,7 @@ fun SettingsScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .appleBounceClick {
+                                    .applePressable(pressedScale = 0.985f) {
                                         onDefaultFormatChange(fmt)
                                         dismissSheet()
                                     }
@@ -592,21 +607,13 @@ private fun QraftSettingsRow(
     onClick: () -> Unit
 ) {
     val colors = QraftThemeTokens.colors
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val rowAlpha = if (isPressed) 0.72f else 1f
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick
-            )
+            .applePressable(pressedScale = 0.985f, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 14.dp)
-            .graphicsLayer { alpha = rowAlpha }
     ) {
         Surface(
             shape = RoundedCornerShape(12.dp),

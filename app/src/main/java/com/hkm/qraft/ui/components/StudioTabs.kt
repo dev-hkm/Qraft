@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -27,7 +28,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -37,8 +40,9 @@ import com.hkm.qraft.qr.BarcodeEngine
 import com.hkm.qraft.qr.CustomQrShapes
 import com.hkm.qraft.qr.LogoCatalog
 import com.hkm.qraft.qr.QrEngine
+import com.hkm.qraft.ui.theme.AppMotion
 import com.hkm.qraft.ui.theme.QraftThemeTokens
-import com.hkm.qraft.ui.theme.appleBounceClick
+import com.hkm.qraft.ui.theme.applePressable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
@@ -235,7 +239,7 @@ private fun PresetGridCard(
         ),
         modifier = Modifier
             .fillMaxWidth()
-            .appleBounceClick { onSelect() }
+            .applePressable { onSelect() }
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
@@ -308,7 +312,7 @@ private fun PresetGridCard(
                             .align(Alignment.TopEnd)
                             .padding(6.dp)
                             .size(24.dp)
-                            .appleBounceClick { onDelete() }
+                            .applePressable { onDelete() }
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
@@ -1098,7 +1102,7 @@ fun LogoEditorTab(
                             .clip(RoundedCornerShape(14.dp))
                             .background(if (selected) colors.activePillBg else colors.surface)
                             .border(1.dp, if (selected) colors.activePillBg else colors.cardBorder, RoundedCornerShape(14.dp))
-                            .appleBounceClick { onDesignChange(design.copy(logo = logo.copy(emoji = em))) },
+                            .applePressable { onDesignChange(design.copy(logo = logo.copy(emoji = em))) },
                         contentAlignment = Alignment.Center
                     ) {
                         Text(em, fontSize = 22.sp)
@@ -1467,7 +1471,7 @@ fun ColorSwatchRow(
         border = BorderStroke(1.dp, colors.cardBorder),
         modifier = Modifier
             .fillMaxWidth()
-            .appleBounceClick { onClick() }
+            .applePressable { onClick() }
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
@@ -1505,17 +1509,34 @@ fun LabeledSlider(
     onValueChange: (Float) -> Unit
 ) {
     val colors = QraftThemeTokens.colors
+    val haptics = LocalHapticFeedback.current
+    val span = (valueRange.endInclusive - valueRange.start).coerceAtLeast(0.0001f)
+    fun quantizeBucket(v: Float): Int = (((v - valueRange.start) / span) * 18f).roundToInt()
+    var lastBucket by remember { mutableIntStateOf(quantizeBucket(value)) }
+
     Column {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(label, style = MaterialTheme.typography.labelLarge, color = colors.textPrimary)
-            Text(valueText, style = MaterialTheme.typography.labelMedium, color = colors.espressoAccent, fontWeight = FontWeight.Bold)
+            Text(
+                text = valueText,
+                style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+                color = colors.espressoAccent,
+                fontWeight = FontWeight.Bold
+            )
         }
         Slider(
             value = value.coerceIn(valueRange.start, valueRange.endInclusive),
-            onValueChange = onValueChange,
+            onValueChange = { next ->
+                val bucket = quantizeBucket(next)
+                if (bucket != lastBucket) {
+                    lastBucket = bucket
+                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                }
+                onValueChange(next)
+            },
             valueRange = valueRange,
             colors = SliderDefaults.colors(
                 thumbColor = colors.espressoAccent,
@@ -1534,13 +1555,23 @@ private fun ShapePreviewTile(
     preview: @Composable () -> Unit
 ) {
     val colors = QraftThemeTokens.colors
+    val tileBg by animateColorAsState(
+        targetValue = if (selected) colors.activePillBg else Color.Transparent,
+        animationSpec = AppMotion.snappySpring(),
+        label = "shapeTileBg"
+    )
+    val tileFg by animateColorAsState(
+        targetValue = if (selected) colors.activePillContent else colors.textSecondary,
+        animationSpec = AppMotion.snappySpring(),
+        label = "shapeTileFg"
+    )
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(5.dp),
         modifier = Modifier
             .clip(RoundedCornerShape(14.dp))
-            .background(if (selected) colors.activePillBg else Color.Transparent)
-            .appleBounceClick { onClick() }
+            .background(tileBg)
+            .applePressable(pressedScale = 0.94f) { onClick() }
             .padding(vertical = 8.dp, horizontal = 3.dp)
     ) {
         preview()
@@ -1549,7 +1580,7 @@ private fun ShapePreviewTile(
             style = MaterialTheme.typography.labelSmall.copy(
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
             ),
-            color = if (selected) colors.activePillContent else colors.textSecondary,
+            color = tileFg,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )

@@ -10,19 +10,12 @@ import android.view.ViewTreeObserver
 import android.view.Window
 import android.view.WindowManager
 import androidx.activity.compose.PredictiveBackHandler
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.FastOutLinearInEasing
-import androidx.compose.animation.core.LinearOutSlowInEasing
-import androidx.compose.animation.core.MutableTransitionState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -48,27 +41,43 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
+import com.hkm.qraft.ui.theme.AppMotion
 import com.hkm.qraft.ui.theme.QraftThemeTokens
+import com.hkm.qraft.ui.theme.rememberReduceMotion
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
 
-internal val QraftParallaxEasing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
+internal val QraftParallaxEasing: CubicBezierEasing = AppMotion.AppleSheet
 
-/** Single, snappy Tonser-grade motion used by every Qraft bottom sheet. */
+/** Single Apple-grade motion profile used by every Qraft bottom sheet. */
 data class QraftSheetMotionProfile(
     val scrimAlpha: Float,
     val scrimDurationMillis: Int,
@@ -80,12 +89,12 @@ data class QraftSheetMotionProfile(
 ) {
     companion object {
         val Focused = QraftSheetMotionProfile(
-            scrimAlpha = 0.34f,
-            scrimDurationMillis = 140,
-            enterDurationMillis = 190,
-            enterFadeDurationMillis = 140,
-            exitDurationMillis = 150,
-            exitFadeDurationMillis = 100,
+            scrimAlpha = 0.40f,
+            scrimDurationMillis = 240,
+            enterDurationMillis = 360,
+            enterFadeDurationMillis = 200,
+            exitDurationMillis = 280,
+            exitFadeDurationMillis = 160,
             platformDimAmount = 0f
         )
     }
@@ -104,7 +113,7 @@ fun QraftSheetDragHandle(
     ) {
         Box(
             modifier = Modifier
-                .width(36.dp)
+                .width(38.dp)
                 .height(4.dp)
                 .clip(CircleShape)
                 .background(color)
@@ -113,8 +122,12 @@ fun QraftSheetDragHandle(
 }
 
 /**
- * Tonser-derived modal bottom sheet. Opens cleanly to full natural height up to [maxHeightFraction],
- * eliminating Material 3 ModalBottomSheet partial-expansion clipping and drag/scroll conflicts.
+ * Interactive Apple-grade modal bottom sheet driven by ONE normalized progress scalar:
+ * - Opens via [AppMotion.navigationSpring] (critically calm, zero wobble on tap open).
+ * - Supports 1:1 vertical drag-to-dismiss from both the drag handle and nested-scroll top overscroll.
+ * - Applies [AppMotion.rubberBand] resistance when pulled upward past rest and projects flick velocity
+ *   via [AppMotion.projectOffset] with direct velocity handoff (`initialVelocity`).
+ * - Supports Android 14+ finger-coupled [QraftPredictiveBackHandler].
  */
 @Composable
 fun QraftModalSheet(
@@ -129,158 +142,258 @@ fun QraftModalSheet(
     dragHandle: @Composable (() -> Unit)? = { QraftSheetDragHandle() },
     content: @Composable ColumnScope.(dismissWithAnimation: () -> Unit) -> Unit
 ) {
-    val sheetVisibility = remember { MutableTransitionState(false) }
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val haptics = LocalHapticFeedback.current
+    val reduceMotion = rememberReduceMotion()
     val currentOnDismiss by rememberUpdatedState(onDismissRequest)
-    var dismissalRequested by remember { mutableStateOf(false) }
+
+    // Unified scalar: 0f = offscreen/dismissed, 1f = resting open
+    val openProgress = remember { Animatable(if (reduceMotion) 1f else 0f) }
+    var rawDragPx by remember { mutableFloatStateOf(0f) }
+    var sheetHeightPx by remember { mutableFloatStateOf(with(density) { 420.dp.toPx() }) }
     var backProgress by remember { mutableFloatStateOf(0f) }
+    var isDismissing by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        sheetVisibility.targetState = true
-    }
-
-    LaunchedEffect(
-        sheetVisibility.currentState,
-        sheetVisibility.targetState,
-        sheetVisibility.isIdle,
-        dismissalRequested
-    ) {
-        if (dismissalRequested && sheetVisibility.isIdle && !sheetVisibility.currentState) {
+    fun triggerDismiss(releaseVelocityY: Float = 0f) {
+        if (isDismissing) return
+        isDismissing = true
+        scope.launch {
+            if (reduceMotion) {
+                openProgress.snapTo(0f)
+            } else {
+                val safeHeight = sheetHeightPx.coerceAtLeast(360f)
+                val normalizedVel = (-releaseVelocityY / safeHeight).coerceIn(-6f, 0f)
+                openProgress.animateTo(
+                    targetValue = 0f,
+                    animationSpec = AppMotion.navigationSpring(),
+                    initialVelocity = normalizedVel
+                )
+            }
             currentOnDismiss()
         }
     }
 
-    val dismissWithAnimation: () -> Unit = {
-        if (!dismissalRequested) {
-            dismissalRequested = true
-            sheetVisibility.targetState = false
+    LaunchedEffect(Unit) {
+        if (!reduceMotion) {
+            openProgress.animateTo(1f, AppMotion.navigationSpring())
         }
     }
 
-    val scrimAlpha by animateFloatAsState(
-        targetValue = if (sheetVisibility.targetState) {
-            motion.scrimAlpha * (1f - backProgress * 0.45f)
-        } else 0f,
-        animationSpec = tween(
-            durationMillis = if (sheetVisibility.targetState) motion.scrimDurationMillis else motion.exitDurationMillis,
-            easing = if (sheetVisibility.targetState) LinearOutSlowInEasing else FastOutLinearInEasing
-        ),
-        label = "qraft_sheet_scrim_alpha"
-    )
+    fun settleAfterDrag(velocityY: Float) {
+        if (isDismissing) return
+        val safeHeight = sheetHeightPx.coerceAtLeast(360f)
+        val projected = rawDragPx + AppMotion.projectOffset(velocityY, decelerationRate = 0.99f)
+        val shouldDismiss = (projected > safeHeight * 0.34f && rawDragPx > 12f) ||
+            (velocityY > 1050f && rawDragPx > 24f)
+
+        if (shouldDismiss) {
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            rawDragPx = 0f
+            triggerDismiss(velocityY)
+        } else {
+            rawDragPx = 0f
+            scope.launch {
+                val velNorm = (-velocityY / safeHeight).coerceIn(-4f, 4f)
+                openProgress.animateTo(
+                    targetValue = 1f,
+                    animationSpec = AppMotion.navigationSpring(),
+                    initialVelocity = velNorm
+                )
+            }
+        }
+    }
+
+    // Nested scroll connection so dragging down at scroll top smoothly peels the sheet
+    val nestedSheetScroll = remember {
+        var nestedAccumulator = 0f
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.UserInput && rawDragPx > 0f && available.y < 0f) {
+                    val prev = rawDragPx
+                    rawDragPx = (rawDragPx + available.y).coerceAtLeast(0f)
+                    val safeH = sheetHeightPx.coerceAtLeast(360f)
+                    scope.launch { openProgress.snapTo((1f - rawDragPx / safeH).coerceIn(0f, 1.15f)) }
+                    return Offset(0f, rawDragPx - prev)
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                if (source == NestedScrollSource.UserInput && available.y > 0f) {
+                    nestedAccumulator = (rawDragPx + available.y).coerceAtLeast(0f)
+                    rawDragPx = nestedAccumulator
+                    val safeH = sheetHeightPx.coerceAtLeast(360f)
+                    scope.launch { openProgress.snapTo((1f - rawDragPx / safeH).coerceIn(0f, 1.15f)) }
+                    return Offset(0f, available.y)
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (rawDragPx > 0f) {
+                    settleAfterDrag(available.y)
+                    return available
+                }
+                return Velocity.Zero
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                if (rawDragPx > 0f) {
+                    settleAfterDrag(available.y)
+                }
+                nestedAccumulator = 0f
+                return Velocity.Zero
+            }
+        }
+    }
+
+    val dismissAction: () -> Unit = { triggerDismiss(0f) }
 
     Dialog(
-        onDismissRequest = dismissWithAnimation,
+        onDismissRequest = dismissAction,
         properties = DialogProperties(
+            dismissOnBackPress = false,
+            dismissOnClickOutside = true,
             usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false,
-            dismissOnBackPress = false
+            decorFitsSystemWindows = false
         )
     ) {
         QraftDialogSystemBars(
             background = containerColor,
             platformDimAmount = motion.platformDimAmount
         )
-        QraftPredictiveBackHandler(
-            enabled = !dismissalRequested,
-            onProgress = { progress ->
-                if (!dismissalRequested) {
-                    backProgress = progress.coerceIn(0f, 1f)
-                }
-            },
-            onBack = {
-                backProgress = 0f
-                dismissWithAnimation()
-            }
-        )
-        val imePadding = qraftModalImePadding()
 
-        Box(
-            modifier = Modifier.fillMaxSize(),
+        QraftPredictiveBackHandler(
+            enabled = !isDismissing,
+            onProgress = { p -> backProgress = p },
+            onBack = dismissAction
+        )
+
+        val backdropInteraction = remember { MutableInteractionSource() }
+        val colors = QraftThemeTokens.colors
+
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .safeDrawingPadding(),
             contentAlignment = Alignment.BottomCenter
         ) {
+            val dynamicCap = (maxHeight * maxHeightFraction).coerceAtMost(hardCap)
+            val fallbackHeightPx = with(density) { (dynamicCap * 0.85f).toPx() }
+
+            // One normalized scalar driving scrim, translation, scale, and predictive peel
+            val progressScalar = openProgress.value
+            val dimFraction = progressScalar.coerceIn(0f, 1f) * (1f - 0.35f * backProgress)
+
+            // Scrim fade strictly coupled to openProgress + backProgress
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .graphicsLayer { alpha = scrimAlpha }
-                    .background(Color.Black)
+                    .graphicsLayer { alpha = dimFraction }
+                    .background(Color.Black.copy(alpha = motion.scrimAlpha))
                     .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
+                        interactionSource = backdropInteraction,
                         indication = null,
-                        onClick = dismissWithAnimation
+                        onClick = dismissAction
                     )
             )
 
-            BoxWithConstraints(
-                modifier = Modifier.fillMaxSize()
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .then(qraftModalImePadding()),
+                contentAlignment = Alignment.BottomCenter
             ) {
-                val isWideWindow = maxWidth >= 600.dp
-                val systemBarPadding = if (isWideWindow) Modifier.safeDrawingPadding() else Modifier.statusBarsPadding()
-                val sheetMaxHeight = minOf(
-                    maxHeight * maxHeightFraction.coerceIn(0.1f, 1f),
-                    hardCap,
-                    maxHeight
-                )
-                val sheetWidth = if (isWideWindow) {
-                    (maxWidth - 48.dp).coerceAtLeast(1.dp).coerceAtMost(640.dp)
-                } else {
-                    maxWidth
-                }
-                val sheetShape = if (isWideWindow) RoundedCornerShape(28.dp) else shape
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .then(imePadding)
-                        .then(systemBarPadding),
-                    contentAlignment = if (isWideWindow) Alignment.Center else Alignment.BottomCenter
-                ) {
-                    AnimatedVisibility(
-                        visibleState = sheetVisibility,
-                        enter = slideInVertically(
-                            initialOffsetY = { it },
-                            animationSpec = tween(motion.enterDurationMillis, easing = QraftParallaxEasing)
-                        ) + fadeIn(tween(motion.enterFadeDurationMillis), initialAlpha = 0f),
-                        exit = slideOutVertically(
-                            targetOffsetY = { it },
-                            animationSpec = tween(motion.exitDurationMillis, easing = FastOutLinearInEasing)
-                        ) + fadeOut(tween(motion.exitFadeDurationMillis), targetAlpha = 0f),
-                        modifier = Modifier
-                            .width(sheetWidth)
-                            .heightIn(max = sheetMaxHeight)
-                    ) {
-                        Surface(
-                            modifier = modifier
-                                .fillMaxWidth()
-                                .heightIn(max = sheetMaxHeight)
-                                .graphicsLayer {
-                                    if (backProgress > 0f) {
-                                        translationY = 72.dp.toPx() * backProgress
-                                        val s = 1f - 0.04f * backProgress
-                                        scaleX = s
-                                        scaleY = s
-                                    }
-                                }
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
-                                    onClick = { /* consume inside sheet */ }
-                                ),
-                            shape = sheetShape,
-                            color = containerColor,
-                            contentColor = contentColor,
-                            tonalElevation = 0.dp,
-                            shadowElevation = 18.dp
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .then(if (isWideWindow) Modifier else Modifier.navigationBarsPadding())
-                            ) {
-                                if (dragHandle != null) {
-                                    dragHandle()
-                                }
-                                content(dismissWithAnimation)
+                Surface(
+                    modifier = modifier
+                        .fillMaxWidth()
+                        .heightIn(max = dynamicCap)
+                        .onSizeChanged { sz ->
+                            if (sz.height > 0) sheetHeightPx = sz.height.toFloat()
+                        }
+                        .graphicsLayer {
+                            val h = (sheetHeightPx.takeIf { it > 0f } ?: fallbackHeightPx)
+                            val backCurved = 0.7f * backProgress +
+                                0.3f * (1f - (1f - backProgress) * (1f - backProgress))
+                            val slideFromOpen = if (progressScalar <= 1f) {
+                                (1f - progressScalar) * (h + 36.dp.toPx())
+                            } else {
+                                // Upward rubber-band when pulled above rest
+                                val overPx = (progressScalar - 1f) * h
+                                -AppMotion.rubberBand(overPx, h, constant = 0.55f)
+                            }
+                            translationY = slideFromOpen + backCurved * 28.dp.toPx()
+                            val s = (0.96f + 0.04f * progressScalar.coerceIn(0f, 1f)) *
+                                (1f - 0.055f * backCurved)
+                            scaleX = s
+                            scaleY = s
+                            transformOrigin = TransformOrigin(0.5f, 1f)
+                            alpha = progressScalar.coerceIn(0f, 1f).let { p ->
+                                if (p < 0.15f) p / 0.15f else 1f
                             }
                         }
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = {}
+                        )
+                        .nestedScroll(nestedSheetScroll),
+                    shape = shape,
+                    color = containerColor,
+                    contentColor = contentColor,
+                    border = BorderStroke(1.dp, colors.cardBorder),
+                    shadowElevation = 18.dp,
+                    tonalElevation = 0.dp
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                    ) {
+                        if (dragHandle != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .pointerInput(Unit) {
+                                        val tracker = VelocityTracker()
+                                        detectVerticalDragGestures(
+                                            onDragStart = {
+                                                tracker.resetTracking()
+                                                rawDragPx = 0f
+                                            },
+                                            onVerticalDrag = { change, dragAmount ->
+                                                change.consume()
+                                                tracker.addPosition(change.uptimeMillis, change.position)
+                                                rawDragPx += dragAmount
+                                                val safeH = sheetHeightPx.coerceAtLeast(360f)
+                                                val targetScalar = if (rawDragPx >= 0f) {
+                                                    (1f - rawDragPx / safeH).coerceIn(0f, 1f)
+                                                } else {
+                                                    // Upward overshoot rubber-band
+                                                    1f + (-rawDragPx / safeH).coerceIn(0f, 0.45f)
+                                                }
+                                                scope.launch { openProgress.snapTo(targetScalar) }
+                                            },
+                                            onDragEnd = {
+                                                val vy = tracker.calculateVelocity().y
+                                                settleAfterDrag(vy)
+                                            },
+                                            onDragCancel = {
+                                                settleAfterDrag(0f)
+                                            }
+                                        )
+                                    }
+                            ) {
+                                dragHandle()
+                            }
+                        }
+                        content(dismissAction)
                     }
                 }
             }
@@ -289,8 +402,8 @@ fun QraftModalSheet(
 }
 
 @Composable
-private fun QraftPredictiveBackHandler(
-    enabled: Boolean,
+fun QraftPredictiveBackHandler(
+    enabled: Boolean = true,
     onBack: () -> Unit,
     onProgress: (Float) -> Unit = {}
 ) {
@@ -300,8 +413,8 @@ private fun QraftPredictiveBackHandler(
     PredictiveBackHandler(enabled = enabled) { progress: Flow<androidx.activity.BackEventCompat> ->
         try {
             progress.collect { event ->
-                val raw = event.progress
-                val curved = 1f - (1f - raw) * (1f - raw)
+                val raw = event.progress.coerceIn(0f, 1f)
+                val curved = 0.7f * raw + 0.3f * (1f - (1f - raw) * (1f - raw))
                 currentOnProgress.value(curved)
             }
             currentOnProgress.value(1f)
