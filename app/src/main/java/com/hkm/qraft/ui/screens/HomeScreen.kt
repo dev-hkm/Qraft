@@ -133,6 +133,7 @@ fun HomeScreen(
             .fillMaxSize()
             .background(colors.background)
     ) {
+        val navBottomPad = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -142,7 +143,7 @@ fun HomeScreen(
                 start = 20.dp,
                 end = 20.dp,
                 top = 8.dp,
-                bottom = 116.dp
+                bottom = navBottomPad + 96.dp
             ),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
@@ -424,7 +425,7 @@ fun HomeScreen(
                     ) {
                         Box(
                             modifier = Modifier
-                                .defaultMinSize(minHeight = 36.dp)
+                                .defaultMinSize(minHeight = 40.dp)
                                 .clip(RoundedCornerShape(50))
                                 .background(colors.heroBannerBg)
                                 .applePressable { onImportQr() }
@@ -441,7 +442,7 @@ fun HomeScreen(
                         }
                         Box(
                             modifier = Modifier
-                                .defaultMinSize(minHeight = 36.dp)
+                                .defaultMinSize(minHeight = 40.dp)
                                 .clip(RoundedCornerShape(50))
                                 .background(colors.surfaceMuted)
                                 .applePressable { onOpenBatch() }
@@ -458,7 +459,7 @@ fun HomeScreen(
                         }
                         Box(
                             modifier = Modifier
-                                .defaultMinSize(minHeight = 36.dp)
+                                .defaultMinSize(minHeight = 40.dp)
                                 .heroSource("hero_library", cornerRadiusDp = 12f)
                                 .clip(RoundedCornerShape(10.dp))
                                 .applePressable { onOpenLibrary() }
@@ -715,7 +716,7 @@ fun QrTimelineRowCard(
             )
             Box(
                 modifier = Modifier
-                    .defaultMinSize(minWidth = 30.dp, minHeight = 36.dp)
+                    .defaultMinSize(minWidth = 44.dp, minHeight = 44.dp)
                     .applePressable(pressedScale = 0.85f) { onDotClick() },
                 contentAlignment = Alignment.Center
             ) {

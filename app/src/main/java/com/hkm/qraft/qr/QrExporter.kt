@@ -315,12 +315,15 @@ object QrExporter {
         canvas.drawText("${spec.format.label} • ${spec.data.take(64)}", pageW / 2f, 430f, subtitlePaint)
 
         val codeBmp = BarcodeEngine.renderBarcodeBitmap(spec, targetWidthPx = 2048, forceOpaqueWhiteForJpeg = false)
-        val drawW = 2000f
-        val drawH = drawW * (codeBmp.height.toFloat() / codeBmp.width.toFloat())
-        val left = (pageW - drawW) / 2f
-        val top = (pageH - drawH) / 2f
-        canvas.drawBitmap(codeBmp, null, RectF(left, top, left + drawW, top + drawH), Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
-        codeBmp.recycle()
+        try {
+            val drawW = 2000f
+            val drawH = drawW * (codeBmp.height.toFloat() / codeBmp.width.toFloat())
+            val left = (pageW - drawW) / 2f
+            val top = (pageH - drawH) / 2f
+            canvas.drawBitmap(codeBmp, null, RectF(left, top, left + drawW, top + drawH), Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+        } finally {
+            codeBmp.recycle()
+        }
 
         val footerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = 0xFF8C8C94.toInt()
@@ -502,15 +505,18 @@ object QrExporter {
             targetWidthPx = 1920,
             forceOpaqueWhiteForJpeg = false
         )
-        val availableH = 2380f
-        val drawScale = minOf(1f, availableH / qrBmp.height.toFloat())
-        val drawW = qrBmp.width * drawScale
-        val drawH = qrBmp.height * drawScale
-        val left = (pageW - drawW) / 2f
-        val top = 560f + ((availableH - drawH).coerceAtLeast(0f) / 2f)
-        val dst = RectF(left, top, left + drawW, top + drawH)
-        canvas.drawBitmap(qrBmp, null, dst, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
-        qrBmp.recycle()
+        try {
+            val availableH = 2380f
+            val drawScale = minOf(1f, availableH / qrBmp.height.toFloat())
+            val drawW = qrBmp.width * drawScale
+            val drawH = qrBmp.height * drawScale
+            val left = (pageW - drawW) / 2f
+            val top = 560f + ((availableH - drawH).coerceAtLeast(0f) / 2f)
+            val dst = RectF(left, top, left + drawW, top + drawH)
+            canvas.drawBitmap(qrBmp, null, dst, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+        } finally {
+            qrBmp.recycle()
+        }
 
         val footerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = 0xFF8B837B.toInt()

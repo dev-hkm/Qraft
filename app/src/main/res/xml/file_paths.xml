@@ -3,4 +3,5 @@
     <cache-path name="shared_exports" path="exports/" />
     <files-path name="saved_exports" path="exports/" />
     <files-path name="qraft_media" path="qraft_media/" />
+    <external-files-path name="external_files" path="." />
 </paths>

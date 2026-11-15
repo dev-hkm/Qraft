@@ -24,7 +24,8 @@ data class UserPreferences(
     val autoVerifyScannability: Boolean = true,
     val defaultExportFormat: ExportImageFormat = ExportImageFormat.PNG,
     val defaultExportResolution: Int = 4096,
-    val creatorName: String = "Creator"
+    val creatorName: String = "Creator",
+    val hasCompletedOnboarding: Boolean = false
 )
 
 class QraftRepository(private val context: Context) {
@@ -40,6 +41,7 @@ class QraftRepository(private val context: Context) {
         val EXPORT_FORMAT = stringPreferencesKey("default_export_format")
         val EXPORT_RESOLUTION = intPreferencesKey("default_export_resolution")
         val CREATOR_NAME = stringPreferencesKey("creator_name")
+        val ONBOARDING_COMPLETED = booleanPreferencesKey("has_completed_onboarding")
     }
 
     val itemsFlow: Flow<List<QrCreationItem>> = context.qraftDataStore.data.map { prefs ->
@@ -79,7 +81,8 @@ class QraftRepository(private val context: Context) {
                 ExportImageFormat.valueOf(prefs[Keys.EXPORT_FORMAT] ?: ExportImageFormat.PNG.name)
             }.getOrDefault(ExportImageFormat.PNG),
             defaultExportResolution = prefs[Keys.EXPORT_RESOLUTION] ?: 4096,
-            creatorName = prefs[Keys.CREATOR_NAME]?.takeIf { it.isNotBlank() } ?: "Creator"
+            creatorName = prefs[Keys.CREATOR_NAME]?.takeIf { it.isNotBlank() } ?: "Creator",
+            hasCompletedOnboarding = prefs[Keys.ONBOARDING_COMPLETED] ?: false
         )
     }
 
@@ -227,6 +230,10 @@ class QraftRepository(private val context: Context) {
 
     suspend fun setCreatorName(name: String) {
         context.qraftDataStore.edit { it[Keys.CREATOR_NAME] = name.trim().ifBlank { "Creator" } }
+    }
+
+    suspend fun setOnboardingCompleted(completed: Boolean) {
+        context.qraftDataStore.edit { it[Keys.ONBOARDING_COMPLETED] = completed }
     }
 
     private fun decodeItems(json: String?, seeded: Boolean): List<QrCreationItem> {

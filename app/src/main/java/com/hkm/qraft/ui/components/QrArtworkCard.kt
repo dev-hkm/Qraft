@@ -524,6 +524,23 @@ fun BarcodeArtworkPreview(
                             }
                         }
                     }
+                } else {
+                    val palette = QraftThemeTokens.colors
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = palette.dangerBg,
+                        modifier = Modifier
+                            .width(if (isSquare2D) barHeight else widthDp - 36.dp)
+                            .height(barHeight)
+                    ) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = "Invalid ${spec.format.label} Input",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = palette.dangerFg
+                            )
+                        }
+                    }
                 }
                 if (spec.showText) {
                     Spacer(Modifier.height(8.dp))

@@ -170,9 +170,25 @@ fun ScannerScreen(
         }
     }
 
+    var permissionRequestedOnce by remember { mutableStateOf(false) }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                hasCameraPermission = ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.CAMERA
+                ) == PackageManager.PERMISSION_GRANTED
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
+        permissionRequestedOnce = true
         hasCameraPermission = granted
     }
 
@@ -209,21 +225,32 @@ fun ScannerScreen(
         }
     }
 
-    LaunchedEffect(cameraRef, lifecycleOwner) {
-        val cam = cameraRef ?: return@LaunchedEffect
-        runCatching {
-            val state = cam.cameraInfo.zoomState.value
-            if (state != null) {
-                minZoomRatio = state.minZoomRatio.coerceAtLeast(0.5f)
-                maxZoomRatio = state.maxZoomRatio.coerceAtLeast(minZoomRatio)
-                currentZoomRatio = state.zoomRatio.coerceIn(minZoomRatio, maxZoomRatio)
-            }
-            cam.cameraInfo.zoomState.observe(lifecycleOwner) { zoomState ->
+    DisposableEffect(cameraRef) {
+        val cam = cameraRef
+        if (cam == null) {
+            onDispose { }
+        } else {
+            val observer = androidx.lifecycle.Observer<androidx.camera.core.ZoomState> { zoomState ->
                 if (zoomState != null) {
-                    minZoomRatio = zoomState.minZoomRatio.coerceAtLeast(0.5f)
-                    maxZoomRatio = zoomState.maxZoomRatio.coerceAtLeast(minZoomRatio)
-                    currentZoomRatio = zoomState.zoomRatio.coerceIn(minZoomRatio, maxZoomRatio)
+                    val safeMin = zoomState.minZoomRatio.coerceAtLeast(0.5f)
+                    val safeMax = zoomState.maxZoomRatio.coerceAtLeast(safeMin + 0.05f)
+                    minZoomRatio = safeMin
+                    maxZoomRatio = safeMax
+                    currentZoomRatio = zoomState.zoomRatio.coerceIn(safeMin, safeMax)
                 }
+            }
+            runCatching {
+                cam.cameraInfo.zoomState.value?.let { state ->
+                    val safeMin = state.minZoomRatio.coerceAtLeast(0.5f)
+                    val safeMax = state.maxZoomRatio.coerceAtLeast(safeMin + 0.05f)
+                    minZoomRatio = safeMin
+                    maxZoomRatio = safeMax
+                    currentZoomRatio = state.zoomRatio.coerceIn(safeMin, safeMax)
+                }
+                cam.cameraInfo.zoomState.observeForever(observer)
+            }
+            onDispose {
+                runCatching { cam.cameraInfo.zoomState.removeObserver(observer) }
             }
         }
     }
@@ -274,9 +301,70 @@ fun ScannerScreen(
     ) {
         if (hasCameraPermission && cameraAvailable) {
             val analyzerExecutor = remember { Executors.newSingleThreadExecutor() }
+            var boundProvider by remember { mutableStateOf<ProcessCameraProvider?>(null) }
+            var boundAnalyzer by remember { mutableStateOf<ImageAnalysis?>(null) }
+            val pausedState = rememberUpdatedState(scannedResult != null || showHistorySheet)
+            val onDecodedState = rememberUpdatedState(::handleDetectedCode)
+
+            LaunchedEffect(previewViewRef, useFrontCamera, lifecycleOwner) {
+                val previewView = previewViewRef ?: return@LaunchedEffect
+                val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+                cameraProviderFuture.addListener({
+                    runCatching {
+                        val cameraProvider = cameraProviderFuture.get()
+                        boundProvider = cameraProvider
+                        val preview = Preview.Builder().build().also {
+                            it.surfaceProvider = previewView.surfaceProvider
+                        }
+                        val selector = if (useFrontCamera) {
+                            CameraSelector.DEFAULT_FRONT_CAMERA
+                        } else {
+                            CameraSelector.DEFAULT_BACK_CAMERA
+                        }
+                        val resSelector = ResolutionSelector.Builder()
+                            .setResolutionStrategy(
+                                ResolutionStrategy(
+                                    AndroidSize(1280, 960),
+                                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                                )
+                            )
+                            .build()
+                        val analyzer = ImageAnalysis.Builder()
+                            .setResolutionSelector(resSelector)
+                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                            .build()
+                            .also { analysis ->
+                                analysis.setAnalyzer(analyzerExecutor, ZxingMultiFormatAnalyzer { decoded ->
+                                    if (!pausedState.value) {
+                                        previewView.post {
+                                            if (!pausedState.value) {
+                                                onDecodedState.value(decoded)
+                                            }
+                                        }
+                                    }
+                                })
+                            }
+                        boundAnalyzer?.clearAnalyzer()
+                        boundAnalyzer = analyzer
+                        cameraProvider.unbindAll()
+                        val cam = cameraProvider.bindToLifecycle(
+                            lifecycleOwner,
+                            selector,
+                            preview,
+                            analyzer
+                        )
+                        cameraRef = cam
+                    }.onFailure {
+                        cameraAvailable = false
+                    }
+                }, ContextCompat.getMainExecutor(context))
+            }
+
             DisposableEffect(Unit) {
                 onDispose {
-                    runCatching { analyzerExecutor.shutdown() }
+                    runCatching { boundAnalyzer?.clearAnalyzer() }
+                    runCatching { boundProvider?.unbindAll() }
+                    runCatching { analyzerExecutor.shutdownNow() }
                 }
             }
 
@@ -287,7 +375,9 @@ fun ScannerScreen(
                         detectTransformGestures { _, _, zoomChange, _ ->
                             val cam = cameraRef ?: return@detectTransformGestures
                             if (zoomChange != 1f) {
-                                val next = (currentZoomRatio * zoomChange).coerceIn(minZoomRatio, maxZoomRatio)
+                                val safeMin = minZoomRatio.coerceAtLeast(0.5f)
+                                val safeMax = maxZoomRatio.coerceAtLeast(safeMin + 0.05f)
+                                val next = (currentZoomRatio * zoomChange).coerceIn(safeMin, safeMax)
                                 currentZoomRatio = next
                                 runCatching { cam.cameraControl.setZoomRatio(next) }
                             }
@@ -295,8 +385,9 @@ fun ScannerScreen(
                     }
                     .pointerInput(cameraRef, previewViewRef) {
                         detectTapGestures { offset ->
-                            focusTapPoint = offset
                             val pv = previewViewRef ?: return@detectTapGestures
+                            if (pv.width <= 0 || pv.height <= 0) return@detectTapGestures
+                            focusTapPoint = offset
                             val cam = cameraRef ?: return@detectTapGestures
                             runCatching {
                                 val point = pv.meteringPointFactory.createPoint(offset.x, offset.y)
@@ -321,53 +412,9 @@ fun ScannerScreen(
                         }
                     },
                     update = { previewView ->
-                        previewViewRef = previewView
-                        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
-                        cameraProviderFuture.addListener({
-                            runCatching {
-                                val cameraProvider = cameraProviderFuture.get()
-                                val preview = Preview.Builder().build().also {
-                                    it.surfaceProvider = previewView.surfaceProvider
-                                }
-                                val selector = if (useFrontCamera) {
-                                    CameraSelector.DEFAULT_FRONT_CAMERA
-                                } else {
-                                    CameraSelector.DEFAULT_BACK_CAMERA
-                                }
-                                val resSelector = ResolutionSelector.Builder()
-                                    .setResolutionStrategy(
-                                        ResolutionStrategy(
-                                            AndroidSize(1280, 960),
-                                            ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
-                                        )
-                                    )
-                                    .build()
-                                val analyzer = ImageAnalysis.Builder()
-                                    .setResolutionSelector(resSelector)
-                                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                                    .build()
-                                    .also { analysis ->
-                                        analysis.setAnalyzer(analyzerExecutor, ZxingMultiFormatAnalyzer { decoded ->
-                                            if (scannedResult == null && !showHistorySheet) {
-                                                previewView.post {
-                                                    handleDetectedCode(decoded)
-                                                }
-                                            }
-                                        })
-                                    }
-
-                                cameraProvider.unbindAll()
-                                val cam = cameraProvider.bindToLifecycle(
-                                    lifecycleOwner,
-                                    selector,
-                                    preview,
-                                    analyzer
-                                )
-                                cameraRef = cam
-                            }.onFailure {
-                                cameraAvailable = false
-                            }
-                        }, ContextCompat.getMainExecutor(context))
+                        if (previewViewRef !== previewView) {
+                            previewViewRef = previewView
+                        }
                     }
                 )
 
@@ -646,8 +693,10 @@ fun ScannerScreen(
                                         color = Color.White.copy(alpha = 0.90f)
                                     )
                                 }
+                                val safeMin = minZoomRatio.coerceAtLeast(0.5f)
+                                val safeMax = maxZoomRatio.coerceAtLeast(safeMin + 0.05f)
                                 Slider(
-                                    value = currentZoomRatio.coerceIn(minZoomRatio, maxZoomRatio),
+                                    value = currentZoomRatio.coerceIn(safeMin, safeMax),
                                     onValueChange = { z ->
                                         currentZoomRatio = z
                                         val bucket = (z * 2f).roundToInt()
@@ -657,7 +706,7 @@ fun ScannerScreen(
                                         }
                                         runCatching { cameraRef?.cameraControl?.setZoomRatio(z) }
                                     },
-                                    valueRange = minZoomRatio..maxZoomRatio,
+                                    valueRange = safeMin..safeMax,
                                     colors = SliderDefaults.colors(
                                         thumbColor = Color.White,
                                         activeTrackColor = Color.White,
@@ -831,8 +880,29 @@ fun ScannerScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             if (!hasCameraPermission) {
+                                val permanentlyDenied = permissionRequestedOnce &&
+                                    (context as? android.app.Activity)?.let { act ->
+                                        !androidx.core.app.ActivityCompat.shouldShowRequestPermissionRationale(
+                                            act,
+                                            Manifest.permission.CAMERA
+                                        )
+                                    } == true
                                 Button(
-                                    onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) },
+                                    onClick = {
+                                        if (permanentlyDenied) {
+                                            runCatching {
+                                                val intent = Intent(
+                                                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                                    Uri.fromParts("package", context.packageName, null)
+                                                ).apply {
+                                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                }
+                                                context.startActivity(intent)
+                                            }
+                                        } else {
+                                            permissionLauncher.launch(Manifest.permission.CAMERA)
+                                        }
+                                    },
                                     shape = RoundedCornerShape(16.dp),
                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 12.dp),
                                     colors = ButtonDefaults.buttonColors(
@@ -841,9 +911,13 @@ fun ScannerScreen(
                                     ),
                                     modifier = Modifier.weight(1f)
                                 ) {
-                                    Icon(Icons.Rounded.CameraAlt, null, modifier = Modifier.size(16.dp))
+                                    Icon(
+                                        if (permanentlyDenied) Icons.Rounded.Settings else Icons.Rounded.CameraAlt,
+                                        null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
                                     Spacer(Modifier.width(5.dp))
-                                    Text("Camera", maxLines = 1, softWrap = false)
+                                    Text(if (permanentlyDenied) "Settings" else "Camera", maxLines = 1, softWrap = false)
                                 }
                             }
                             OutlinedButton(
@@ -1232,11 +1306,15 @@ private fun resolveSmartAction(
             safeLaunchIntent(ctx, intent)
         }
     }
-    val isUrlLike = rawText.startsWith("http://", ignoreCase = true) ||
+    val isUrlLike = type == QrContentType.URL ||
+        rawText.startsWith("http://", ignoreCase = true) ||
         rawText.startsWith("https://", ignoreCase = true)
     if (isUrlLike) {
+        val targetUrl = fields?.url?.takeIf { it.isNotBlank() } ?: rawText.trim().let {
+            if (it.startsWith("http://", ignoreCase = true) || it.startsWith("https://", ignoreCase = true)) it else "https://$it"
+        }
         return SmartScanAction("Open Link", Icons.Rounded.OpenInBrowser) { ctx, _ ->
-            safeLaunchIntent(ctx, Intent(Intent.ACTION_VIEW, Uri.parse(rawText)))
+            safeLaunchIntent(ctx, Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)))
         }
     }
     return null
@@ -1246,6 +1324,12 @@ private fun safeLaunchIntent(context: Context, intent: Intent) {
     runCatching {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(intent)
+    }.onFailure {
+        android.widget.Toast.makeText(
+            context,
+            "No compatible app found to handle this action",
+            android.widget.Toast.LENGTH_SHORT
+        ).show()
     }
 }
 
@@ -1389,22 +1473,23 @@ private class ZxingMultiFormatAnalyzer(
             buffer.get(data)
             val width = image.width
             val height = image.height
-            if (width <= 0 || height <= 0) return
+            val rowStride = plane.rowStride.coerceAtLeast(width)
+            if (width <= 0 || height <= 0 || data.size < rowStride * (height - 1) + width) return
 
             // 1. Center ROI crop improves long-distance small QR lock
-            val cropW = (width * 0.56f).toInt().coerceIn(120, width)
-            val cropH = (height * 0.56f).toInt().coerceIn(120, height)
-            val cropLeft = (width - cropW) / 2
-            val cropTop = (height - cropH) / 2
+            val cropW = (width * 0.56f).toInt().coerceIn(1, width)
+            val cropH = (height * 0.56f).toInt().coerceIn(1, height)
+            val cropLeft = ((width - cropW) / 2).coerceAtLeast(0)
+            val cropTop = ((height - cropH) / 2).coerceAtLeast(0)
             val centerSource = PlanarYUVLuminanceSource(
-                data, width, height, cropLeft, cropTop, cropW, cropH, false
+                data, rowStride, height, cropLeft, cropTop, cropW, cropH, false
             )
             var result = decodeLuminanceSource(centerSource)
 
             // 2. Full frame fallback (good for wide 1D retail barcodes or offset QRs)
             if (result == null) {
                 val fullSource = PlanarYUVLuminanceSource(
-                    data, width, height, 0, 0, width, height, false
+                    data, rowStride, height, 0, 0, width, height, false
                 )
                 result = decodeLuminanceSource(fullSource)
                     ?: if (frameCounter % 2 == 0) decodeLuminanceSource(fullSource.invert()) else null

@@ -411,11 +411,15 @@ object QrEngine {
             if (!forceOpaqueWhiteForJpeg || design.background.mode != BackgroundMode.TRANSPARENT) {
                 return core
             }
-            val opaque = Bitmap.createBitmap(safeW, safeW, Bitmap.Config.ARGB_8888)
-            val c = AndroidCanvas(opaque)
-            c.drawColor(0xFFFFFFFF.toInt())
-            c.drawBitmap(core, 0f, 0f, null)
-            core.recycle()
+            val opaque = try {
+                Bitmap.createBitmap(safeW, safeW, Bitmap.Config.ARGB_8888).also { bmp ->
+                    val c = AndroidCanvas(bmp)
+                    c.drawColor(0xFFFFFFFF.toInt())
+                    c.drawBitmap(core, 0f, 0f, null)
+                }
+            } finally {
+                core.recycle()
+            }
             return opaque
         }
 
@@ -447,7 +451,9 @@ object QrEngine {
 
         val totalH = w + extraBottom + extraTop
         val bitmap = Bitmap.createBitmap(w, totalH, Bitmap.Config.ARGB_8888)
-        val canvas = AndroidCanvas(bitmap)
+        var logoBitmap: Bitmap? = null
+        try {
+            val canvas = AndroidCanvas(bitmap)
 
         if (forceOpaqueWhiteForJpeg) {
             canvas.drawColor(0xFFFFFFFF.toInt())
@@ -657,7 +663,7 @@ object QrEngine {
 
         // Render QR core directly onto `canvas` inside `qrRect` — zero double-bitmap OOM overhead at 8K!
         val safeData = data.ifBlank { "https://qraft.studio" }
-        val logoBitmap = LogoCatalog.renderLogoBitmap(
+        logoBitmap = LogoCatalog.renderLogoBitmap(
             context,
             design.logo,
             outputPx = (qrSize * 0.28f).roundToInt().coerceIn(120, 1024)
@@ -669,74 +675,81 @@ object QrEngine {
         val innerSize = (qrSize - quietPx * 2).coerceAtLeast(64)
 
         val qrSave = canvas.save()
-        val qrClip = android.graphics.Path().apply {
-            addRoundRect(qrRect, qrCorner, qrCorner, android.graphics.Path.Direction.CW)
-        }
-        canvas.clipPath(qrClip)
-        when (design.background.mode) {
-            BackgroundMode.TRANSPARENT -> Unit
-            BackgroundMode.SOLID -> {
-                canvas.drawRect(qrRect, Paint().apply { color = design.background.brush.primaryColor.toInt() })
+        try {
+            val qrClip = android.graphics.Path().apply {
+                addRoundRect(qrRect, qrCorner, qrCorner, android.graphics.Path.Direction.CW)
             }
-            BackgroundMode.GRADIENT -> {
-                canvas.save()
-                canvas.translate(qrRect.left, qrRect.top)
-                val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    style = Paint.Style.FILL
-                    val shader = buildNativeShader(design.background.brush, qrSize.toFloat(), qrSize.toFloat())
-                    if (shader != null) this.shader = shader else color = design.background.brush.primaryColor.toInt()
+            canvas.clipPath(qrClip)
+            when (design.background.mode) {
+                BackgroundMode.TRANSPARENT -> Unit
+                BackgroundMode.SOLID -> {
+                    canvas.drawRect(qrRect, Paint().apply { color = design.background.brush.primaryColor.toInt() })
                 }
-                canvas.drawRect(0f, 0f, qrSize.toFloat(), qrSize.toFloat(), bgPaint)
-                canvas.restore()
-            }
-            BackgroundMode.PHOTO -> {
-                val photo = design.background.photoUri?.let {
-                    LogoCatalog.loadSampledUri(context, Uri.parse(it), qrSize.coerceAtMost(2048))
-                }
-                if (photo != null) {
-                    val side = min(photo.width, photo.height)
-                    val left = (photo.width - side) / 2
-                    val top = (photo.height - side) / 2
-                    canvas.drawBitmap(
-                        photo,
-                        android.graphics.Rect(left, top, left + side, top + side),
-                        qrRect,
-                        Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-                    )
-                    photo.recycle()
-                } else {
-                    canvas.drawRect(qrRect, Paint().apply { color = 0xFFFFFFFF.toInt() })
-                }
-                val scrimColor = Color(design.background.photoOverlayColor)
-                    .copy(alpha = design.background.photoOverlayAlpha.coerceIn(0f, 0.95f))
-                canvas.drawRect(
-                    qrRect,
-                    Paint().apply {
-                        color = android.graphics.Color.argb(
-                            (scrimColor.alpha * 255).roundToInt(),
-                            (scrimColor.red * 255).roundToInt(),
-                            (scrimColor.green * 255).roundToInt(),
-                            (scrimColor.blue * 255).roundToInt()
-                        )
+                BackgroundMode.GRADIENT -> {
+                    canvas.save()
+                    canvas.translate(qrRect.left, qrRect.top)
+                    val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        style = Paint.Style.FILL
+                        val shader = buildNativeShader(design.background.brush, qrSize.toFloat(), qrSize.toFloat())
+                        if (shader != null) this.shader = shader else color = design.background.brush.primaryColor.toInt()
                     }
-                )
-            }
-        }
-        val composeCanvas = androidx.compose.ui.graphics.Canvas(bitmap.asImageBitmap())
-        CanvasDrawScope().draw(
-            density = Density(1f),
-            layoutDirection = LayoutDirection.Ltr,
-            canvas = composeCanvas,
-            size = Size(w.toFloat(), totalH.toFloat())
-        ) {
-            translate(left = qrPad + quietPx, top = qrTop.toFloat() + quietPx) {
-                with(painter) {
-                    draw(Size(innerSize.toFloat(), innerSize.toFloat()))
+                    canvas.drawRect(0f, 0f, qrSize.toFloat(), qrSize.toFloat(), bgPaint)
+                    canvas.restore()
+                }
+                BackgroundMode.PHOTO -> {
+                    val photo = design.background.photoUri?.let {
+                        LogoCatalog.loadSampledUri(context, Uri.parse(it), qrSize.coerceAtMost(2048))
+                    }
+                    if (photo != null) {
+                        try {
+                            val side = min(photo.width, photo.height)
+                            val left = (photo.width - side) / 2
+                            val top = (photo.height - side) / 2
+                            canvas.drawBitmap(
+                                photo,
+                                android.graphics.Rect(left, top, left + side, top + side),
+                                qrRect,
+                                Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+                            )
+                        } finally {
+                            photo.recycle()
+                        }
+                    } else {
+                        canvas.drawRect(qrRect, Paint().apply { color = 0xFFFFFFFF.toInt() })
+                    }
+                    val scrimColor = Color(design.background.photoOverlayColor)
+                        .copy(alpha = design.background.photoOverlayAlpha.coerceIn(0f, 0.95f))
+                    canvas.drawRect(
+                        qrRect,
+                        Paint().apply {
+                            color = android.graphics.Color.argb(
+                                (scrimColor.alpha * 255).roundToInt(),
+                                (scrimColor.red * 255).roundToInt(),
+                                (scrimColor.green * 255).roundToInt(),
+                                (scrimColor.blue * 255).roundToInt()
+                            )
+                        }
+                    )
                 }
             }
+            val composeCanvas = androidx.compose.ui.graphics.Canvas(bitmap.asImageBitmap())
+            CanvasDrawScope().draw(
+                density = Density(1f),
+                layoutDirection = LayoutDirection.Ltr,
+                canvas = composeCanvas,
+                size = Size(w.toFloat(), totalH.toFloat())
+            ) {
+                translate(left = qrPad + quietPx, top = qrTop.toFloat() + quietPx) {
+                    with(painter) {
+                        draw(Size(innerSize.toFloat(), innerSize.toFloat()))
+                    }
+                }
+            }
+        } finally {
+            canvas.restoreToCount(qrSave)
+            logoBitmap?.recycle()
+            logoBitmap = null
         }
-        canvas.restoreToCount(qrSave)
-        logoBitmap?.recycle()
 
         val label = frame.label.trim().ifBlank { "SCAN ME" }
         val bottomText = if (frame.style == OuterFrameStyle.DOUBLE_PILL && frame.subtitle.isNotBlank()) {
@@ -881,7 +894,12 @@ object QrEngine {
             OuterFrameStyle.GRADIENT_BORDER, OuterFrameStyle.NONE, OuterFrameStyle.CLEAN_CARD -> Unit
         }
 
-        return bitmap
+            return bitmap
+        } catch (t: Throwable) {
+            runCatching { logoBitmap?.recycle() }
+            if (!bitmap.isRecycled) runCatching { bitmap.recycle() }
+            throw t
+        }
     }
 
     private fun fitTextSize(
@@ -981,7 +999,8 @@ object QrEngine {
 
     fun exportSvg(data: String, design: QrDesignSpec): String {
         val safeData = data.ifBlank { "https://qraft.studio" }
-        val qr = Encoder.encode(safeData, effectiveZxingEcc(design))
+        val qr = runCatching { Encoder.encode(safeData, effectiveZxingEcc(design)) }
+            .getOrElse { Encoder.encode(safeData.take(1200), ErrorCorrectionLevel.L) }
         val matrix = qr.matrix
         val count = matrix.width
         val cell = 20f
@@ -1659,11 +1678,20 @@ object QrEngine {
         sb.append("L${fmt(x)},${fmt(y + cut)}Z ")
     }
 
-    private fun escapeXml(text: String): String = text
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace("\"", "&quot;")
+    private fun escapeXml(text: String): String = buildString(text.length) {
+        text.forEach { ch ->
+            when (ch) {
+                '&' -> append("&amp;")
+                '<' -> append("&lt;")
+                '>' -> append("&gt;")
+                '"' -> append("&quot;")
+                '\t', '\n', '\r' -> append(ch)
+                else -> if (ch.code >= 0x20 && ch.code != 0xFFFE && ch.code != 0xFFFF) {
+                    append(ch)
+                }
+            }
+        }
+    }
 
     fun contrastRatio(argbA: Long, argbB: Long): Double {
         val lumA = relativeLuminance(argbA)

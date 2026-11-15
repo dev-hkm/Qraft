@@ -14,7 +14,12 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -54,6 +59,7 @@ import com.hkm.qraft.qr.QrPayloadEncoder
 import com.hkm.qraft.ui.components.*
 import com.hkm.qraft.ui.screens.HomeScreen
 import com.hkm.qraft.ui.screens.LibraryScreen
+import com.hkm.qraft.ui.screens.OnboardingScreen
 import com.hkm.qraft.ui.screens.ScannerScreen
 import com.hkm.qraft.ui.screens.SettingsScreen
 import com.hkm.qraft.ui.screens.StudioScreen
@@ -108,14 +114,19 @@ data class FullscreenPreviewState(
     val barcode: BarcodeDesignSpec? = null
 )
 
+sealed interface PendingSharedInput {
+    data class Text(val text: String) : PendingSharedInput
+    data class ImageUri(val uri: Uri) : PendingSharedInput
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val initialShared = extractSharedText(intent)
+        val initialShared = extractSharedInput(intent)
         setContent {
-            var pendingSharedText by remember { mutableStateOf(initialShared) }
+            var pendingSharedInput by remember { mutableStateOf(initialShared) }
             val viewModel: QraftViewModel = viewModel()
             val prefs by viewModel.preferences.collectAsStateWithLifecycle()
             val darkTheme = when (prefs.themeMode) {
@@ -141,7 +152,7 @@ class MainActivity : ComponentActivity() {
 
             DisposableEffect(Unit) {
                 val listener = Consumer<Intent> { newIntent ->
-                    extractSharedText(newIntent)?.let { pendingSharedText = it }
+                    extractSharedInput(newIntent)?.let { pendingSharedInput = it }
                 }
                 addOnNewIntentListener(listener)
                 onDispose { removeOnNewIntentListener(listener) }
@@ -150,21 +161,33 @@ class MainActivity : ComponentActivity() {
             QraftTheme(themeMode = prefs.themeMode) {
                 QraftRoot(
                     viewModel = viewModel,
-                    initialSharedText = pendingSharedText,
-                    onConsumeSharedText = { pendingSharedText = null }
+                    pendingSharedInput = pendingSharedInput,
+                    onConsumeSharedInput = { pendingSharedInput = null }
                 )
             }
         }
     }
 
-    private fun extractSharedText(intent: Intent?): String? {
+    private fun extractSharedInput(intent: Intent?): PendingSharedInput? {
         if (intent == null) return null
+        val streamUri = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
         return when (intent.action) {
-            Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
-            Intent.ACTION_VIEW -> intent.dataString
+            Intent.ACTION_SEND -> {
+                val extraText = intent.getStringExtra(Intent.EXTRA_TEXT)?.takeIf { it.isNotBlank() }
+                if (streamUri != null && (intent.type?.startsWith("image/") == true || extraText == null)) {
+                    PendingSharedInput.ImageUri(streamUri)
+                } else {
+                    extraText?.let(PendingSharedInput::Text)
+                }
+            }
+            Intent.ACTION_VIEW -> intent.dataString?.takeIf { it.isNotBlank() }?.let(PendingSharedInput::Text)
             else -> {
-                val streamUri = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
-                streamUri?.toString()
+                val extraText = intent.getStringExtra(Intent.EXTRA_TEXT)?.takeIf { it.isNotBlank() }
+                when {
+                    streamUri != null && intent.type?.startsWith("image/") == true -> PendingSharedInput.ImageUri(streamUri)
+                    extraText != null -> PendingSharedInput.Text(extraText)
+                    else -> null
+                }
             }
         }
     }
@@ -173,10 +196,11 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun QraftRoot(
     viewModel: QraftViewModel,
-    initialSharedText: String? = null,
-    onConsumeSharedText: () -> Unit = {}
+    pendingSharedInput: PendingSharedInput? = null,
+    onConsumeSharedInput: () -> Unit = {}
 ) {
     val prefs by viewModel.preferences.collectAsStateWithLifecycle()
+    val preferencesLoaded by viewModel.preferencesLoaded.collectAsStateWithLifecycle()
     val savedItems by viewModel.savedItems.collectAsStateWithLifecycle()
     val draft by viewModel.draft.collectAsStateWithLifecycle()
     val scannability by viewModel.scannability.collectAsStateWithLifecycle()
@@ -288,12 +312,20 @@ fun QraftRoot(
         if (uri != null) viewModel.importBackupFromUri(uri)
     }
 
-    LaunchedEffect(initialSharedText) {
-        if (!initialSharedText.isNullOrBlank()) {
-            viewModel.importSharedPayload(initialSharedText) {
-                pushDest(QraftDest.Studio())
+    var replayOnboarding by remember { mutableStateOf(false) }
+    val showOnboarding = preferencesLoaded && (!prefs.hasCompletedOnboarding || replayOnboarding)
+
+    LaunchedEffect(pendingSharedInput, showOnboarding, preferencesLoaded) {
+        if (preferencesLoaded && !showOnboarding && pendingSharedInput != null) {
+            when (pendingSharedInput) {
+                is PendingSharedInput.Text -> viewModel.importSharedPayload(pendingSharedInput.text) {
+                    pushDest(QraftDest.Studio())
+                }
+                is PendingSharedInput.ImageUri -> viewModel.importQrFromUri(pendingSharedInput.uri) {
+                    pushDest(QraftDest.Studio())
+                }
             }
-            onConsumeSharedText()
+            onConsumeSharedInput()
         }
     }
 
@@ -479,7 +511,8 @@ fun QraftRoot(
                     },
                     onImportBackup = {
                         runCatching { backupImportLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }
-                    }
+                    },
+                    onReplayOnboarding = { replayOnboarding = true }
                 )
             }
         }
@@ -604,6 +637,35 @@ fun QraftRoot(
                         .zIndex(backStack.lastIndex - 0.5f)
                         .graphicsLayer { alpha = effectiveReveal * 0.24f }
                         .background(Color.Black)
+                )
+            }
+
+            if (!preferencesLoaded) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .zIndex(90f)
+                        .background(QraftThemeTokens.colors.background)
+                )
+            }
+
+            AnimatedVisibility(
+                visible = showOnboarding,
+                enter = when {
+                    !replayOnboarding -> EnterTransition.None
+                    reduceMotion -> fadeIn(tween(120))
+                    else -> fadeIn(tween(240))
+                },
+                exit = if (reduceMotion) fadeOut(tween(120)) else (fadeOut(tween(260)) + scaleOut(targetScale = 1.04f, animationSpec = tween(260))),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(95f)
+            ) {
+                OnboardingScreen(
+                    onFinish = {
+                        replayOnboarding = false
+                        viewModel.setOnboardingCompleted(true)
+                    }
                 )
             }
 

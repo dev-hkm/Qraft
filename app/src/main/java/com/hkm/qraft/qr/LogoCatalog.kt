@@ -319,6 +319,10 @@ object LogoCatalog {
                     }
                 }
             }
+            if (!outFile.exists() || outFile.length() <= 0L) {
+                outFile.delete()
+                return@runCatching null
+            }
             Uri.fromFile(outFile).toString()
         }.getOrNull()
     }

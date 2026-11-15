@@ -99,6 +99,7 @@ fun SettingsScreen(
     onDefaultResolutionChange: (Int) -> Unit,
     onExportBackup: () -> Unit,
     onImportBackup: () -> Unit,
+    onReplayOnboarding: () -> Unit = {},
     onStatusMessage: (String) -> Unit = {}
 ) {
     val colors = QraftThemeTokens.colors
@@ -396,9 +397,18 @@ fun SettingsScreen(
                     QraftSettingsDivider()
 
                     QraftSettingsRow(
+                        icon = Icons.Rounded.AutoAwesome,
+                        title = "Welcome Guide",
+                        subtitle = "Replay onboarding & feature highlights",
+                        onClick = onReplayOnboarding
+                    )
+
+                    QraftSettingsDivider()
+
+                    QraftSettingsRow(
                         icon = Icons.Rounded.QrCode2,
                         title = "Qraft QR Studio",
-                        subtitle = "Version 7.0.1 • Apple Motion & Liquid Glass",
+                        subtitle = "Version 7.1.0 • Apple Motion & Liquid Glass",
                         trailing = null,
                         onClick = {}
                     )

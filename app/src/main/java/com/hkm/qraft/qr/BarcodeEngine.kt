@@ -512,9 +512,18 @@ object BarcodeEngine {
 
     private fun toHex(argb: Long): String = String.format("#%06X", (argb and 0x00FFFFFFL))
 
-    private fun escape(text: String): String = text
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace("\"", "&quot;")
+    private fun escape(text: String): String = buildString(text.length) {
+        text.forEach { ch ->
+            when (ch) {
+                '&' -> append("&amp;")
+                '<' -> append("&lt;")
+                '>' -> append("&gt;")
+                '"' -> append("&quot;")
+                '\t', '\n', '\r' -> append(ch)
+                else -> if (ch.code >= 0x20 && ch.code != 0xFFFE && ch.code != 0xFFFF) {
+                    append(ch)
+                }
+            }
+        }
+    }
 }

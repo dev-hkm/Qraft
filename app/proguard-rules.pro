@@ -1,3 +1,4 @@
 -keep class com.hkm.qraft.model.** { *; }
+-keep class com.hkm.qraft.data.QraftBackupBundle { *; }
 -keepattributes Signature
 -keepattributes *Annotation*

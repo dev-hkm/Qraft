@@ -129,25 +129,36 @@ object QrPayloadEncoder {
         }
     }
 
+    private fun escapeStructuredText(raw: String): String =
+        raw.trim()
+            .replace("\\", "\\\\")
+            .replace(";", "\\;")
+            .replace(",", "\\,")
+            .replace("\r\n", "\\n")
+            .replace("\n", "\\n")
+            .replace("\r", "")
+
     private fun encodeVCard(fields: QrPayloadFields): String {
         val lines = mutableListOf(
             "BEGIN:VCARD",
             "VERSION:3.0"
         )
-        val first = fields.firstName.trim()
-        val last = fields.lastName.trim()
-        val fullName = listOf(first, last).filter { it.isNotBlank() }.joinToString(" ")
+        val first = escapeStructuredText(fields.firstName)
+        val last = escapeStructuredText(fields.lastName)
+        val fullName = listOf(fields.firstName.trim(), fields.lastName.trim())
+            .filter { it.isNotBlank() }
+            .joinToString(" ")
         lines += "N:$last;$first;;;"
-        if (fullName.isNotBlank()) lines += "FN:$fullName"
-        if (fields.organization.isNotBlank()) lines += "ORG:${fields.organization.trim()}"
-        if (fields.jobTitle.isNotBlank()) lines += "TITLE:${fields.jobTitle.trim()}"
+        if (fullName.isNotBlank()) lines += "FN:${escapeStructuredText(fullName)}"
+        if (fields.organization.isNotBlank()) lines += "ORG:${escapeStructuredText(fields.organization)}"
+        if (fields.jobTitle.isNotBlank()) lines += "TITLE:${escapeStructuredText(fields.jobTitle)}"
         if (fields.phone.isNotBlank()) lines += "TEL;TYPE=CELL:${fields.phone.trim()}"
         if (fields.email.isNotBlank()) lines += "EMAIL;TYPE=INTERNET:${fields.email.trim()}"
         if (fields.website.isNotBlank()) lines += "URL:${encodeUrl(fields.website)}"
         if (fields.street.isNotBlank() || fields.city.isNotBlank() || fields.country.isNotBlank()) {
-            lines += "ADR;TYPE=WORK:;;${fields.street.trim()};${fields.city.trim()};;;${fields.country.trim()}"
+            lines += "ADR;TYPE=WORK:;;${escapeStructuredText(fields.street)};${escapeStructuredText(fields.city)};;;${escapeStructuredText(fields.country)}"
         }
-        if (fields.note.isNotBlank()) lines += "NOTE:${fields.note.trim()}"
+        if (fields.note.isNotBlank()) lines += "NOTE:${escapeStructuredText(fields.note)}"
         lines += "END:VCARD"
         return lines.joinToString("\n")
     }
@@ -183,11 +194,11 @@ object QrPayloadEncoder {
             add("BEGIN:VCALENDAR")
             add("VERSION:2.0")
             add("BEGIN:VEVENT")
-            add("SUMMARY:${fields.eventTitle.trim()}")
-            if (fields.eventLocation.isNotBlank()) add("LOCATION:${fields.eventLocation.trim()}")
+            add("SUMMARY:${escapeStructuredText(fields.eventTitle)}")
+            if (fields.eventLocation.isNotBlank()) add("LOCATION:${escapeStructuredText(fields.eventLocation)}")
             if (fields.eventStart.isNotBlank()) add("DTSTART:${fields.eventStart.trim()}")
             if (fields.eventEnd.isNotBlank()) add("DTEND:${fields.eventEnd.trim()}")
-            if (fields.eventDescription.isNotBlank()) add("DESCRIPTION:${fields.eventDescription.trim()}")
+            if (fields.eventDescription.isNotBlank()) add("DESCRIPTION:${escapeStructuredText(fields.eventDescription)}")
             add("END:VEVENT")
             add("END:VCALENDAR")
         }.joinToString("\n")

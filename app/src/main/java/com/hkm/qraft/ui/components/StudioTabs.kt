@@ -304,23 +304,27 @@ private fun PresetGridCard(
                         }
                     }
                 } else if (onDelete != null) {
-                    Surface(
-                        shape = CircleShape,
-                        color = colors.surface.copy(alpha = 0.92f),
-                        border = BorderStroke(1.dp, colors.cardBorder),
+                    Box(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .padding(6.dp)
-                            .size(24.dp)
-                            .applePressable { onDelete() }
+                            .size(44.dp)
+                            .applePressable { onDelete() },
+                        contentAlignment = Alignment.Center
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Rounded.DeleteOutline,
-                                contentDescription = "Delete preset",
-                                tint = colors.textSecondary,
-                                modifier = Modifier.size(14.dp)
-                            )
+                        Surface(
+                            shape = CircleShape,
+                            color = colors.surface.copy(alpha = 0.92f),
+                            border = BorderStroke(1.dp, colors.cardBorder),
+                            modifier = Modifier.size(26.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Rounded.DeleteOutline,
+                                    contentDescription = "Delete preset",
+                                    tint = colors.textSecondary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -747,7 +751,9 @@ fun ColorsEditorTab(
                     BackgroundMode.PHOTO -> {
                         Button(
                             onClick = {
-                                photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                                runCatching {
+                                    photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                                }
                             },
                             shape = RoundedCornerShape(50),
                             colors = ButtonDefaults.buttonColors(
@@ -1002,7 +1008,9 @@ fun LogoEditorTab(
                     selected = logo.sourceType == src,
                     onClick = {
                         if (src == LogoSourceType.GALLERY && logo.galleryUri == null) {
-                            logoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            runCatching {
+                                logoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            }
                         } else {
                             onDesignChange(design.copy(logo = logo.copy(sourceType = src)))
                         }
@@ -1030,7 +1038,9 @@ fun LogoEditorTab(
             LogoSourceType.GALLERY -> {
                 Button(
                     onClick = {
-                        logoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        runCatching {
+                            logoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        }
                     },
                     shape = RoundedCornerShape(50),
                     colors = ButtonDefaults.buttonColors(

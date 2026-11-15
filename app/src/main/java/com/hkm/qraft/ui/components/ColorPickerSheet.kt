@@ -291,10 +291,7 @@ fun ColorPickerModalSheet(
                     ColorSwatches.recent.forEach { swatch ->
                         Box(
                             modifier = Modifier
-                                .size(26.dp)
-                                .clip(CircleShape)
-                                .background(Color(swatch))
-                                .border(1.dp, colors.cardBorder, CircleShape)
+                                .size(40.dp)
                                 .applePressable(pressedScale = 0.90f) {
                                     val arr = FloatArray(3)
                                     android.graphics.Color.colorToHSV(swatch.toInt(), arr)
@@ -302,27 +299,29 @@ fun ColorPickerModalSheet(
                                     sat = arr[1]
                                     value = arr[2]
                                     isEditingHex = false
-                                }
-                        )
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(swatch))
+                                    .border(1.dp, colors.cardBorder, CircleShape)
+                            )
+                        }
                     }
                 }
             }
 
             LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 items(ColorSwatches.curated) { swatch ->
                     val isSelected = (swatch and 0xFFFFFFL) == (currentColor and 0xFFFFFFL)
                     Box(
                         modifier = Modifier
-                            .size(34.dp)
-                            .clip(CircleShape)
-                            .background(Color(swatch))
-                            .border(
-                                width = if (isSelected) 2.5.dp else 1.dp,
-                                color = if (isSelected) colors.espressoAccent else colors.cardBorder,
-                                shape = CircleShape
-                            )
+                            .size(44.dp)
                             .applePressable(pressedScale = 0.90f) {
                                 val arr = FloatArray(3)
                                 android.graphics.Color.colorToHSV(swatch.toInt(), arr)
@@ -330,8 +329,21 @@ fun ColorPickerModalSheet(
                                 sat = arr[1]
                                 value = arr[2]
                                 isEditingHex = false
-                            }
-                    )
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(Color(swatch))
+                                .border(
+                                    width = if (isSelected) 2.5.dp else 1.dp,
+                                    color = if (isSelected) colors.espressoAccent else colors.cardBorder,
+                                    shape = CircleShape
+                                )
+                        )
+                    }
                 }
             }
 

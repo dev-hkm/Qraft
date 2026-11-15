@@ -45,7 +45,8 @@ Most QR generator apps on mobile throw subscription walls at you just to change 
 - **3-Tier Liquid Glass (`AppleGlass`)**: AGSL `RuntimeShader` Fresnel & chromatic edge refraction on Android 13+ hero controls, live Haze multi-layer backdrop sampling (`AppleProgressiveEdgeFrost` headers & floating action docks), and adaptive translucent catchlight fallbacks down to Android 7.0 — plus full `Reduce Transparency` high-contrast support.
 - **Perceptual Spring Physics (`AppMotion`)**: Layered depth-stack navigation (`SaveableStateHolder`) with shared-element hero morphs, finger-coupled predictive back peel, velocity-projected drag-to-dismiss sheets & fullscreen previews (`projectOffset` + asymptotic `rubberBand`), pointer-down spring compression, gliding pill segmented tabs, tabular odometer counters, and full `ANIMATOR_DURATION_SCALE` respect.
 
-### Vault Library & Preferences
+### Vault Library, Onboarding & Preferences
+- **Interactive Onboarding**: 3-slide Liquid Glass welcome walkthrough showcasing Qraft's "100% Free Forever, Zero Paywalls" philosophy with a live interactive preset preview switcher and replay access from Settings.
 - **Archive & Organization**: Search across active & archived codes, filter by type/barcodes/favorites/folders, attach custom tags, rename items, bulk-favorite, bulk-archive, bulk-print, or export portable `.qraft` JSON backups.
 - **Dedicated Settings Screen**: Clean adaptive light/dark theme switcher (`System / Light / Dark`), default export format & resolution, live scannability toggle, and offline vault backup/restore.
 
@@ -89,7 +90,7 @@ app/src/main/java/com/hkm/qraft/
 └── ui/
     ├── QraftViewModel.kt        # Studio undo/redo history, draft state & batch jobs
     ├── components/              # Pinned sheets, color picker, content forms, studio tabs
-    ├── screens/                 # Home, Studio, Library Vault, Scanner & Settings
+    ├── screens/                 # Home, Onboarding, Studio, Library Vault, Scanner & Settings
     └── theme/                   # Monochrome palette tokens, AppMotion springs & AppleGlass engine
 ```
 

@@ -582,8 +582,6 @@ fun StudioScreen(
                 ) {}
             }
         }
-
-        QraftStatusBarScrim(modifier = Modifier.align(Alignment.TopCenter))
     }
 }
 

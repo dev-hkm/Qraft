@@ -12,7 +12,6 @@ import android.view.WindowManager
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -21,6 +20,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -28,7 +29,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -278,19 +279,18 @@ fun QraftModalSheet(
         val colors = QraftThemeTokens.colors
 
         BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxSize()
-                .safeDrawingPadding(),
+            modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.BottomCenter
         ) {
-            val dynamicCap = (maxHeight * maxHeightFraction).coerceAtMost(hardCap)
+            val statusTopPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+            val dynamicCap = ((maxHeight - statusTopPadding).coerceAtLeast(240.dp) * maxHeightFraction).coerceAtMost(hardCap)
             val fallbackHeightPx = with(density) { (dynamicCap * 0.85f).toPx() }
 
             // One normalized scalar driving scrim, translation, scale, and predictive peel
             val progressScalar = openProgress.value
             val dimFraction = progressScalar.coerceIn(0f, 1f) * (1f - 0.35f * backProgress)
 
-            // Scrim fade strictly coupled to openProgress + backProgress
+            // Scrim fade strictly coupled to openProgress + backProgress across full edge-to-edge height
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -302,6 +302,17 @@ fun QraftModalSheet(
                         onClick = dismissAction
                     )
             )
+
+            // Upward rubber-band anchor bleed so over-pulling never exposes a sliver behind system nav bar
+            if (progressScalar > 1.005f) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .background(containerColor)
+                )
+            }
 
             Box(
                 modifier = Modifier
@@ -347,53 +358,64 @@ fun QraftModalSheet(
                     shape = shape,
                     color = containerColor,
                     contentColor = contentColor,
-                    border = BorderStroke(1.dp, colors.cardBorder),
+                    border = null,
                     shadowElevation = 18.dp,
                     tonalElevation = 0.dp
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .navigationBarsPadding()
-                    ) {
-                        if (dragHandle != null) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .pointerInput(Unit) {
-                                        val tracker = VelocityTracker()
-                                        detectVerticalDragGestures(
-                                            onDragStart = {
-                                                tracker.resetTracking()
-                                                rawDragPx = 0f
-                                            },
-                                            onVerticalDrag = { change, dragAmount ->
-                                                change.consume()
-                                                tracker.addPosition(change.uptimeMillis, change.position)
-                                                rawDragPx += dragAmount
-                                                val safeH = sheetHeightPx.coerceAtLeast(360f)
-                                                val targetScalar = if (rawDragPx >= 0f) {
-                                                    (1f - rawDragPx / safeH).coerceIn(0f, 1f)
-                                                } else {
-                                                    // Upward overshoot rubber-band
-                                                    1f + (-rawDragPx / safeH).coerceIn(0f, 0.45f)
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .navigationBarsPadding()
+                        ) {
+                            if (dragHandle != null) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .pointerInput(Unit) {
+                                            val tracker = VelocityTracker()
+                                            detectVerticalDragGestures(
+                                                onDragStart = {
+                                                    tracker.resetTracking()
+                                                    rawDragPx = 0f
+                                                },
+                                                onVerticalDrag = { change, dragAmount ->
+                                                    change.consume()
+                                                    tracker.addPosition(change.uptimeMillis, change.position)
+                                                    rawDragPx += dragAmount
+                                                    val safeH = sheetHeightPx.coerceAtLeast(360f)
+                                                    val targetScalar = if (rawDragPx >= 0f) {
+                                                        (1f - rawDragPx / safeH).coerceIn(0f, 1f)
+                                                    } else {
+                                                        // Upward overshoot rubber-band
+                                                        1f + (-rawDragPx / safeH).coerceIn(0f, 0.45f)
+                                                    }
+                                                    scope.launch { openProgress.snapTo(targetScalar) }
+                                                },
+                                                onDragEnd = {
+                                                    val vy = tracker.calculateVelocity().y
+                                                    settleAfterDrag(vy)
+                                                },
+                                                onDragCancel = {
+                                                    settleAfterDrag(0f)
                                                 }
-                                                scope.launch { openProgress.snapTo(targetScalar) }
-                                            },
-                                            onDragEnd = {
-                                                val vy = tracker.calculateVelocity().y
-                                                settleAfterDrag(vy)
-                                            },
-                                            onDragCancel = {
-                                                settleAfterDrag(0f)
-                                            }
-                                        )
-                                    }
-                            ) {
-                                dragHandle()
+                                            )
+                                        }
+                                ) {
+                                    dragHandle()
+                                }
                             }
+                            content(dismissAction)
                         }
-                        content(dismissAction)
+                        // Crisp top-only specular hairline matching the sheet's rounded top edge without cutting the bottom nav edge
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .fillMaxWidth()
+                                .padding(horizontal = 24.dp)
+                                .height(1.dp)
+                                .background(colors.cardBorder.copy(alpha = 0.55f))
+                        )
                     }
                 }
             }
@@ -426,7 +448,7 @@ fun QraftPredictiveBackHandler(
 }
 
 @Composable
-private fun QraftDialogSystemBars(
+internal fun QraftDialogSystemBars(
     background: Color = QraftThemeTokens.colors.surface,
     platformDimAmount: Float? = null
 ) {
@@ -440,6 +462,12 @@ private fun QraftDialogSystemBars(
                 .filterIsInstance<DialogWindowProvider>().firstOrNull() ?: return
             val window = provider.window
             if (window !== configuredWindow.value) {
+                window.setLayout(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT
+                )
+                window.setBackgroundDrawableResource(android.R.color.transparent)
+                androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
                 @Suppress("DEPRECATION")
                 if (window.statusBarColor != AndroidColor.TRANSPARENT) {
                     window.statusBarColor = AndroidColor.TRANSPARENT

@@ -97,7 +97,7 @@ private val DarkQraftColors = QraftColors(
     cardBorder = Color(0xFF2B2B31),
     textPrimary = Color(0xFFF8F8FA),
     textSecondary = Color(0xFFA1A1AA),
-    textTertiary = Color(0xFF6B6B74),
+    textTertiary = Color(0xFF8E8E96),
     activePillBg = Color(0xFFF8F8FA),
     activePillContent = Color(0xFF0A0A0B),
     espressoAccent = Color(0xFFF8F8FA),
@@ -115,10 +115,10 @@ private val DarkQraftColors = QraftColors(
     dangerFg = Color(0xFFF87171),
     pastels = listOf(
         PastelPair(Color(0xFFF4F4F5), Color(0xFF111113)),
-        PastelPair(Color(0xFF242429), Color(0xFFF4F4F5)),
-        PastelPair(Color(0xFF2C2C33), Color(0xFFE4E4E7)),
+        PastelPair(Color(0xFF2C2C34), Color(0xFFF4F4F5)),
+        PastelPair(Color(0xFF34343D), Color(0xFFE4E4E7)),
         PastelPair(Color(0xFFE4E4E7), Color(0xFF18181B)),
-        PastelPair(Color(0xFF1D1D22), Color(0xFFD4D4D8))
+        PastelPair(Color(0xFF282830), Color(0xFFE4E4E7))
     )
 )
 

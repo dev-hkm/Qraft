@@ -34,8 +34,8 @@ android {
         applicationId = "com.hkm.qraft"
         minSdk = 24
         targetSdk = 36
-        versionCode = 8
-        versionName = "7.0.1"
+        versionCode = 9
+        versionName = "7.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

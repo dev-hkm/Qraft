@@ -40,6 +40,7 @@ import com.hkm.qraft.qr.QrPayloadEncoder
 import com.hkm.qraft.qr.QrPdfWriter
 import com.hkm.qraft.ui.screens.HomeScreen
 import com.hkm.qraft.ui.screens.LibraryScreen
+import com.hkm.qraft.ui.screens.OnboardingScreen
 import com.hkm.qraft.ui.screens.ScannerScreen
 import com.hkm.qraft.ui.screens.SettingsScreen
 import com.hkm.qraft.ui.screens.StudioScreen
@@ -507,7 +508,7 @@ class QraftVerificationTest {
                         onSaveToLibrary = { _, _ -> },
                         onCopyResult = {}
                     )
-                    else -> SettingsScreen(
+                    5 -> SettingsScreen(
                         preferences = UserPreferences(creatorName = "Khanh Minh"),
                         savedCount = 4,
                         archivedCount = 1,
@@ -521,6 +522,7 @@ class QraftVerificationTest {
                         onExportBackup = {},
                         onImportBackup = {}
                     )
+                    else -> OnboardingScreen(onFinish = {})
                 }
             }
         }
@@ -579,6 +581,16 @@ class QraftVerificationTest {
         darkModeState.value = true
         composeRule.waitForIdle()
         savePng("qa_settings_dark.png", composeRule.onRoot().captureToImage().asAndroidBitmap())
+
+        screenState.intValue = 6
+        darkModeState.value = false
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("100% FREE FOREVER").assertIsDisplayed()
+        savePng("qa_onboarding_light.png", composeRule.onRoot().captureToImage().asAndroidBitmap())
+
+        darkModeState.value = true
+        composeRule.waitForIdle()
+        savePng("qa_onboarding_dark.png", composeRule.onRoot().captureToImage().asAndroidBitmap())
 
         if (qaDir != null) {
             val bare = QrEngine.renderFramedExportBitmap(
@@ -836,13 +848,24 @@ class QraftVerificationTest {
     }
 
     @Test
+    @Config(qualifiers = "w360dp-h780dp-xhdpi")
     fun qraftRootPushAndPopBackNavigatesSmoothlyWithoutCrash() {
         val app = ApplicationProvider.getApplicationContext<android.app.Application>()
         val vm = QraftViewModel(app)
+        vm.setOnboardingCompleted(false)
         composeRule.setContent {
             com.hkm.qraft.ui.theme.QraftTheme(themeMode = ThemeMode.LIGHT) {
                 QraftRoot(viewModel = vm)
             }
+        }
+        composeRule.waitUntil(5000) { vm.preferencesLoaded.value }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("100% FREE FOREVER").performScrollTo().assertIsDisplayed()
+
+        // Complete onboarding via Skip -> Home renders cleanly
+        composeRule.onNodeWithText("Skip").performClick()
+        composeRule.waitUntil(5000) {
+            composeRule.onAllNodesWithText("Skip").fetchSemanticsNodes().isEmpty()
         }
         composeRule.waitForIdle()
         composeRule.onNodeWithText("Craft QR &", substring = true).assertIsDisplayed()
@@ -851,8 +874,84 @@ class QraftVerificationTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("Creator Greeting Name", substring = true).assertIsDisplayed()
 
+        // Replay Welcome Guide from Settings -> finishes cleanly back to Settings
+        composeRule.onNodeWithText("Welcome Guide").performScrollTo().performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("100% FREE FOREVER").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("Skip").performClick()
+        composeRule.waitUntil(5000) {
+            composeRule.onAllNodesWithText("Skip").fetchSemanticsNodes().isEmpty()
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Welcome Guide").assertIsDisplayed()
+
         composeRule.onAllNodes(hasContentDescription("Back")).onFirst().performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("Craft QR &", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun vcardAndEventPayloadsEscapeMultilineAndDelimiters() {
+        val vcard = QrPayloadEncoder.encode(
+            QrContentType.VCARD,
+            QrPayloadFields(
+                firstName = "Alex;Jr",
+                lastName = "Minh,PhD",
+                organization = "HKM;Labs",
+                note = "Line 1\nLine 2;Note"
+            )
+        )
+        assertTrue(vcard.contains("N:Minh\\,PhD;Alex\\;Jr;;;"))
+        assertTrue(vcard.contains("ORG:HKM\\;Labs"))
+        assertTrue(vcard.contains("NOTE:Line 1\\nLine 2\\;Note"))
+        assertFalse(vcard.contains("Line 1\nLine 2"))
+
+        val event = QrPayloadEncoder.encode(
+            QrContentType.EVENT,
+            QrPayloadFields(
+                eventTitle = "Launch;Party",
+                eventLocation = "District 1, HCMC",
+                eventDescription = "Meetup\nBring laptop"
+            )
+        )
+        assertTrue(event.contains("SUMMARY:Launch\\;Party"))
+        assertTrue(event.contains("LOCATION:District 1\\, HCMC"))
+        assertTrue(event.contains("DESCRIPTION:Meetup\\nBring laptop"))
+    }
+
+    @Test
+    fun svgEscapesIllegalXmlControlCharsCleanly() {
+        val design = PresetCatalog.builtInPresets.first().design.copy(
+            outerFrame = OuterFrameConfig(
+                style = OuterFrameStyle.BOTTOM_SCAN_BANNER,
+                label = "SCAN\u0000\u0007 ME <OK>"
+            )
+        )
+        val svg = QrEngine.exportSvg("https://qraft.studio", design)
+        assertFalse("XML 1.0 illegal NUL/BEL control characters must be stripped", svg.contains('\u0000') || svg.contains('\u0007'))
+        assertTrue(svg.contains("SCAN ME &lt;OK&gt;"))
+
+        val bcSvg = BarcodeEngine.exportBarcodeSvg(
+            BarcodeDesignSpec(format = BarcodeFormatType.CODE_128, data = "QRAFT\u0001TEST")
+        )
+        assertFalse(bcSvg.contains('\u0001'))
+    }
+
+    @Test
+    fun filePathsAndExtractionRulesXmlExistForAllAndroidApiLevels() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val filePathsXml = context.resources.getXml(R.xml.file_paths)
+        var foundExternalFiles = false
+        var event = filePathsXml.eventType
+        while (event != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
+            if (event == org.xmlpull.v1.XmlPullParser.START_TAG && filePathsXml.name == "external-files-path") {
+                foundExternalFiles = true
+            }
+            event = filePathsXml.next()
+        }
+        assertTrue("file_paths.xml must declare external-files-path for API 24-28 FileProvider exports", foundExternalFiles)
+
+        val rulesId = context.resources.getIdentifier("data_extraction_rules", "xml", context.packageName)
+        assertTrue("data_extraction_rules.xml must exist", rulesId != 0)
     }
 }

@@ -645,13 +645,18 @@ fun FullscreenScanDialog(
             decorFitsSystemWindows = false
         )
     ) {
+        val colors = QraftThemeTokens.colors
+        QraftDialogSystemBars(
+            background = colors.background,
+            platformDimAmount = 0f
+        )
+
         QraftPredictiveBackHandler(
             enabled = !isClosing,
             onProgress = { backProgress = it },
             onBack = { dismissSmooth() }
         )
 
-        val colors = QraftThemeTokens.colors
         val dismissThresholdPx = with(density) { 130.dp.toPx() }
         val dragDismissFrac = (dragYAnim.value / dismissThresholdPx).coerceIn(0f, 1f)
         val combinedAlpha = revealAnim.value.coerceIn(0f, 1f) *
@@ -704,7 +709,9 @@ fun FullscreenScanDialog(
                     indication = null,
                     onClick = { dismissSmooth() }
                 )
-                .padding(24.dp),
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 24.dp, vertical = 12.dp),
             contentAlignment = Alignment.Center
         ) {
             Column(
@@ -898,7 +905,11 @@ fun BatchGeneratorSheet(
                     leadingIcon = Icons.Rounded.UploadFile,
                     height = 42.dp,
                     modifier = Modifier.fillMaxWidth(),
-                    onClick = { csvImportLauncher.launch(arrayOf("text/*", "text/csv", "text/comma-separated-values")) }
+                    onClick = {
+                        runCatching {
+                            csvImportLauncher.launch(arrayOf("text/*", "text/csv", "text/comma-separated-values"))
+                        }
+                    }
                 )
             } else {
                 QraftTextField(

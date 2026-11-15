@@ -143,17 +143,17 @@ fun LibraryScreen(
             .fillMaxSize()
             .background(colors.background)
     ) {
+        val navBottomPad = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         LazyColumn(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
-                .appleHazeSource(hazeState)
-                .navigationBarsPadding(),
+                .appleHazeSource(hazeState),
             contentPadding = PaddingValues(
                 start = 16.dp,
                 end = 16.dp,
                 top = 8.dp,
-                bottom = if (selectionMode) 104.dp else 28.dp
+                bottom = navBottomPad + if (selectionMode) 104.dp else 28.dp
             ),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -341,6 +341,7 @@ fun LibraryScreen(
 
             if (filtered.isEmpty()) {
                 item {
+                    val emptyLibrary = items.isEmpty() && !showArchived
                     Surface(
                         shape = RoundedCornerShape(20.dp),
                         color = colors.surface,
@@ -350,11 +351,49 @@ fun LibraryScreen(
                         Column(
                             modifier = Modifier.padding(28.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Icon(Icons.Rounded.SearchOff, contentDescription = null, tint = colors.textTertiary, modifier = Modifier.size(36.dp))
-                            Text("No matching codes", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary)
-                            Text("Try clearing filters or create a new custom QR or barcode.", style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+                            Icon(
+                                if (emptyLibrary) Icons.Rounded.QrCode2 else Icons.Rounded.SearchOff,
+                                contentDescription = null,
+                                tint = colors.textTertiary,
+                                modifier = Modifier.size(38.dp)
+                            )
+                            Text(
+                                text = if (emptyLibrary) "Your Library is Empty" else "No matching codes",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = colors.textPrimary
+                            )
+                            Text(
+                                text = if (emptyLibrary) {
+                                    "Craft your first custom QR code or scan one from camera or gallery."
+                                } else {
+                                    "Try clearing filters or create a new custom QR or barcode."
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colors.textSecondary
+                            )
+                            if (emptyLibrary) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.padding(top = 4.dp)
+                                ) {
+                                    QraftPillButton(
+                                        text = "Create Code",
+                                        variant = QraftButtonVariant.PRIMARY,
+                                        leadingIcon = Icons.Rounded.Add,
+                                        height = 42.dp,
+                                        onClick = onCreateNew
+                                    )
+                                    QraftPillButton(
+                                        text = "Import",
+                                        variant = QraftButtonVariant.SECONDARY,
+                                        leadingIcon = Icons.Rounded.PhotoLibrary,
+                                        height = 42.dp,
+                                        onClick = onImportQr
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -414,9 +453,10 @@ fun LibraryScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     TextButton(
                         onClick = {
@@ -1013,7 +1053,7 @@ private fun LibraryItemCard(
                 ) {
                     IconButton(
                         onClick = onToggleFavorite,
-                        modifier = Modifier.size(34.dp)
+                        modifier = Modifier.defaultMinSize(minWidth = 44.dp, minHeight = 44.dp)
                     ) {
                         Icon(
                             imageVector = if (item.isFavorite) Icons.Rounded.Star else Icons.Rounded.StarOutline,
@@ -1025,7 +1065,7 @@ private fun LibraryItemCard(
 
                     IconButton(
                         onClick = onFullscreen,
-                        modifier = Modifier.size(34.dp)
+                        modifier = Modifier.defaultMinSize(minWidth = 44.dp, minHeight = 44.dp)
                     ) {
                         Icon(
                             imageVector = if (isBarcode) Icons.Rounded.ViewWeek else Icons.Rounded.QrCode2,
@@ -1037,7 +1077,7 @@ private fun LibraryItemCard(
 
                     IconButton(
                         onClick = onMoreActions,
-                        modifier = Modifier.size(34.dp)
+                        modifier = Modifier.defaultMinSize(minWidth = 44.dp, minHeight = 44.dp)
                     ) {
                         Icon(
                             Icons.Rounded.MoreVert,
