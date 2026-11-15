@@ -398,7 +398,7 @@ fun SettingsScreen(
                     QraftSettingsRow(
                         icon = Icons.Rounded.QrCode2,
                         title = "Qraft QR Studio",
-                        subtitle = "Version 7.0.0 • Apple Motion & Liquid Glass",
+                        subtitle = "Version 7.0.1 • Apple Motion & Liquid Glass",
                         trailing = null,
                         onClick = {}
                     )

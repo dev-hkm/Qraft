@@ -33,11 +33,14 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
+import androidx.compose.ui.zIndex
 import androidx.core.content.IntentCompat
 import androidx.core.util.Consumer
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -64,6 +67,8 @@ import com.hkm.qraft.ui.theme.LocalHeroBounds
 import com.hkm.qraft.ui.theme.QraftTheme
 import com.hkm.qraft.ui.theme.QraftThemeTokens
 import com.hkm.qraft.ui.theme.rememberReduceMotion
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
@@ -190,50 +195,63 @@ fun QraftRoot(
 
     val backStack = remember { mutableStateListOf<QraftDest>(QraftDest.Home) }
     val transitionReveal = remember { Animatable(1f) }
+    val backPeelProgress = remember { Animatable(0f) }
     var isAnimatingTransition by remember { mutableStateOf(false) }
+    var transitionJob by remember { mutableStateOf<Job?>(null) }
 
-    // Predictive Back gesture state (finger-coupled quadratic softening)
+    // Predictive Back gesture state (finger-coupled quadratic softening + peel continuity)
     var backGestureActive by remember { mutableStateOf(false) }
-    var backGestureCurved by remember { mutableFloatStateOf(0f) }
     var backTouchY by remember { mutableFloatStateOf(0.5f) }
     var backSwipeEdge by remember { mutableIntStateOf(BackEventCompat.EDGE_LEFT) }
 
     fun pushDest(dest: QraftDest, popPreviousTop: Boolean = false) {
-        if (backStack.lastOrNull()?.stateKey == dest.stateKey && !popPreviousTop) return
-        if (popPreviousTop && backStack.size > 1) {
-            backStack.removeAt(backStack.lastIndex)
-        }
-        backStack.add(dest)
+        if (backStack.any { it.stateKey == dest.stateKey } && !popPreviousTop) return
+        transitionJob?.cancel()
         backGestureActive = false
-        backGestureCurved = 0f
-        scope.launch {
-            if (reduceMotion) {
-                transitionReveal.snapTo(1f)
-            } else {
-                isAnimatingTransition = true
-                transitionReveal.snapTo(0f)
-                transitionReveal.animateTo(1f, AppMotion.navigationSpring())
+        transitionJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            isAnimatingTransition = true
+            try {
+                backPeelProgress.snapTo(0f)
+                if (reduceMotion) {
+                    if (popPreviousTop && backStack.size > 1) {
+                        backStack.removeAt(backStack.lastIndex)
+                    }
+                    backStack.add(dest)
+                    transitionReveal.snapTo(1f)
+                } else {
+                    transitionReveal.snapTo(0f)
+                    if (popPreviousTop && backStack.size > 1) {
+                        backStack.removeAt(backStack.lastIndex)
+                    }
+                    backStack.add(dest)
+                    transitionReveal.animateTo(1f, AppMotion.navigationSpring())
+                }
+            } finally {
                 isAnimatingTransition = false
             }
         }
     }
 
     fun popDest() {
-        if (backStack.size <= 1 || isAnimatingTransition) return
-        scope.launch {
+        if (backStack.size <= 1) return
+        transitionJob?.cancel()
+        backGestureActive = false
+        transitionJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
             isAnimatingTransition = true
-            if (!reduceMotion) {
-                transitionReveal.animateTo(0f, AppMotion.navigationSpring())
-            } else {
-                transitionReveal.snapTo(0f)
+            try {
+                backPeelProgress.snapTo(0f)
+                if (!reduceMotion && transitionReveal.value > 0.01f) {
+                    transitionReveal.animateTo(0f, AppMotion.navigationSpring())
+                } else {
+                    transitionReveal.snapTo(0f)
+                }
+                if (backStack.size > 1) {
+                    backStack.removeAt(backStack.lastIndex)
+                }
+                transitionReveal.snapTo(1f)
+            } finally {
+                isAnimatingTransition = false
             }
-            if (backStack.size > 1) {
-                backStack.removeAt(backStack.lastIndex)
-            }
-            transitionReveal.snapTo(1f)
-            backGestureActive = false
-            backGestureCurved = 0f
-            isAnimatingTransition = false
         }
     }
 
@@ -292,36 +310,35 @@ fun QraftRoot(
         try {
             progress.collect { event ->
                 val raw = event.progress.coerceIn(0f, 1f)
-                backGestureCurved = 0.7f * raw + 0.3f * (1f - (1f - raw) * (1f - raw))
+                val curved = 0.7f * raw + 0.3f * (1f - (1f - raw) * (1f - raw))
+                backPeelProgress.snapTo(curved)
                 backSwipeEdge = event.swipeEdge
                 backTouchY = if (event.touchY > 0f) event.touchY else 0.5f
             }
-            // Committed back gesture: finish smoothly from current scalar down to 0
-            val startReveal = (1f - backGestureCurved).coerceIn(0f, 1f)
-            backGestureActive = false
-            backGestureCurved = 0f
+            // Committed back gesture: finish smoothly outward from current peel scalar without reversing direction
             isAnimatingTransition = true
             if (!reduceMotion) {
-                transitionReveal.snapTo(startReveal)
-                transitionReveal.animateTo(0f, AppMotion.navigationSpring())
+                backPeelProgress.animateTo(1f, AppMotion.snappySpring())
             } else {
-                transitionReveal.snapTo(0f)
+                backPeelProgress.snapTo(1f)
             }
             if (backStack.size > 1) {
                 backStack.removeAt(backStack.lastIndex)
             }
+            backPeelProgress.snapTo(0f)
             transitionReveal.snapTo(1f)
+            backGestureActive = false
             isAnimatingTransition = false
         } catch (t: Throwable) {
-            backGestureActive = false
-            backGestureCurved = 0f
-            scope.launch { transitionReveal.animateTo(1f, AppMotion.navigationSpring()) }
-            if (t !is kotlinx.coroutines.CancellationException) throw t
-        } finally {
-            if (backGestureActive) {
+            scope.launch {
+                if (!reduceMotion) {
+                    backPeelProgress.animateTo(0f, AppMotion.navigationSpring())
+                } else {
+                    backPeelProgress.snapTo(0f)
+                }
                 backGestureActive = false
-                backGestureCurved = 0f
             }
+            if (t !is kotlinx.coroutines.CancellationException) throw t
         }
     }
 
@@ -476,96 +493,118 @@ fun QraftRoot(
                 .fillMaxSize()
                 .onSizeChanged { containerSize = it }
         ) {
+            val peelCurved = backPeelProgress.value.coerceIn(0f, 1f)
             val effectiveReveal = if (backGestureActive) {
-                (1f - backGestureCurved).coerceIn(0f, 1f)
+                (1f - peelCurved).coerceIn(0f, 1f)
             } else {
                 transitionReveal.value.coerceIn(0f, 1f)
             }
+            val hasActiveOverlay = backStack.size > 1
 
-            if (backStack.size == 1) {
-                RenderRoute(backStack.first())
-            } else {
-                val underDest = backStack[backStack.lastIndex - 1]
-                val topDest = backStack.last()
-                val heroSource: HeroSourceRect? = heroRegistry.get(topDest.heroKey)
+            // Keep every back-stack entry in one persistent key(dest.stateKey) slot so pushing/popping
+            // never unmounts or remounts the underlying screen (prevents flicker & entrance replay).
+            backStack.forEachIndexed { index, dest ->
+                val isTop = index == backStack.lastIndex
+                val isUnder = index == backStack.lastIndex - 1
+                val isHiddenDeep = index < backStack.lastIndex - 1
 
-                // Layer underneath recedes smoothly 1.0 -> 0.94 synchronized with reveal scalar
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            if (!reduceMotion) {
-                                val s = lerp(1.0f, 0.945f, effectiveReveal)
-                                scaleX = s
-                                scaleY = s
-                                alpha = lerp(1.0f, 0.90f, effectiveReveal)
-                                transformOrigin = TransformOrigin.Center
-                            }
-                        }
-                ) {
-                    RenderRoute(underDest)
-                }
-
-                // Optical depth scrim separating stacked layers
-                if (!reduceMotion) {
+                key(dest.stateKey) {
+                    val frozenHeroSource = remember(dest.stateKey, dest.heroKey) {
+                        heroRegistry.get(dest.heroKey)
+                    }
+                    val cornerRadiusDp = when {
+                        !isTop || !hasActiveOverlay -> 0.dp
+                        backGestureActive -> lerp(0f, 30f, peelCurved).dp
+                        frozenHeroSource != null -> lerp(frozenHeroSource.cornerRadiusDp, 0f, effectiveReveal).dp
+                        else -> lerp(26f, 0f, effectiveReveal).dp
+                    }
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .graphicsLayer { alpha = effectiveReveal * 0.24f }
-                            .background(Color.Black)
-                    )
+                            .zIndex(index.toFloat())
+                            .pointerInput(dest.stateKey, isTop) {
+                                if (!isTop) {
+                                    awaitPointerEventScope {
+                                        while (true) {
+                                            val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                            ev.changes.forEach { it.consume() }
+                                        }
+                                    }
+                                }
+                            }
+                            .graphicsLayer {
+                                val w = containerSize.width.toFloat().coerceAtLeast(1f)
+                                val h = containerSize.height.toFloat().coerceAtLeast(1f)
+                                if (cornerRadiusDp > 0.5.dp) {
+                                    shape = RoundedCornerShape(cornerRadiusDp)
+                                    clip = true
+                                } else {
+                                    clip = false
+                                }
+                                when {
+                                    isHiddenDeep -> {
+                                        alpha = 0f
+                                    }
+                                    isUnder -> {
+                                        if (!reduceMotion) {
+                                            val s = lerp(1.0f, 0.945f, effectiveReveal)
+                                            scaleX = s
+                                            scaleY = s
+                                            alpha = lerp(1.0f, 0.90f, effectiveReveal)
+                                            transformOrigin = TransformOrigin.Center
+                                        }
+                                    }
+                                    isTop && hasActiveOverlay -> {
+                                        if (backGestureActive) {
+                                            val c = peelCurved
+                                            val s = lerp(1.0f, 0.84f, c)
+                                            scaleX = s
+                                            scaleY = s
+                                            val dir = if (backSwipeEdge == BackEventCompat.EDGE_LEFT) 1f else -1f
+                                            translationX = dir * w * 0.28f * c
+                                            val yNorm = (backTouchY / h).coerceIn(0f, 1f) - 0.5f
+                                            translationY = yNorm * 32.dp.toPx() * c
+                                            rotationZ = dir * yNorm * 2.4f * c
+                                            alpha = (1f - ((c - 0.55f) / 0.45f).coerceIn(0f, 1f))
+                                            transformOrigin = TransformOrigin.Center
+                                        } else if (!reduceMotion && frozenHeroSource != null) {
+                                            val rect: Rect = frozenHeroSource.rect
+                                            val startScale = maxOf(rect.width / w, rect.height / h).coerceIn(0.62f, 0.95f)
+                                            val s = lerp(startScale, 1f, effectiveReveal)
+                                            scaleX = s
+                                            scaleY = s
+                                            val heroCx = rect.center.x - w / 2f
+                                            val heroCy = rect.center.y - h / 2f
+                                            translationX = lerp(heroCx, 0f, effectiveReveal)
+                                            translationY = lerp(heroCy, 0f, effectiveReveal)
+                                            alpha = (effectiveReveal / 0.25f).coerceIn(0f, 1f)
+                                            transformOrigin = TransformOrigin.Center
+                                        } else if (!reduceMotion) {
+                                            translationX = (1f - effectiveReveal) * (w * 0.26f)
+                                            val s = lerp(0.965f, 1f, effectiveReveal)
+                                            scaleX = s
+                                            scaleY = s
+                                            alpha = (effectiveReveal / 0.30f).coerceIn(0f, 1f)
+                                            transformOrigin = TransformOrigin.Center
+                                        }
+                                    }
+                                }
+                            }
+                    ) {
+                        RenderRoute(dest)
+                    }
                 }
+            }
 
-                // Top active route: Hero-bounds morph if clicked item/card known, else sleek edge depth push + peel
-                val cornerRadiusDp = when {
-                    backGestureActive -> lerp(0f, 30f, backGestureCurved).dp
-                    heroSource != null -> lerp(heroSource.cornerRadiusDp, 0f, effectiveReveal).dp
-                    else -> lerp(26f, 0f, effectiveReveal).dp
-                }
-
+            // Optical depth scrim cleanly separating under-layer and top-layer via zIndex
+            if (hasActiveOverlay && !reduceMotion) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .clip(RoundedCornerShape(cornerRadiusDp))
-                        .graphicsLayer {
-                            val w = containerSize.width.toFloat().coerceAtLeast(1f)
-                            val h = containerSize.height.toFloat().coerceAtLeast(1f)
-                            if (backGestureActive) {
-                                val c = backGestureCurved
-                                val s = lerp(1.0f, 0.88f, c)
-                                scaleX = s
-                                scaleY = s
-                                val dir = if (backSwipeEdge == BackEventCompat.EDGE_LEFT) 1f else -1f
-                                translationX = dir * w * 0.14f * c
-                                val yNorm = (backTouchY / h).coerceIn(0f, 1f) - 0.5f
-                                translationY = yNorm * 32.dp.toPx() * c
-                                rotationZ = dir * yNorm * 2.4f * c
-                                alpha = 1f
-                                transformOrigin = TransformOrigin.Center
-                            } else if (!reduceMotion && heroSource != null) {
-                                val rect: Rect = heroSource.rect
-                                // Uniform scale preserves text/QR aspect ratio during spatial hero morph
-                                val startScale = maxOf(rect.width / w, rect.height / h).coerceIn(0.62f, 0.95f)
-                                val s = lerp(startScale, 1f, effectiveReveal)
-                                scaleX = s
-                                scaleY = s
-                                val heroCx = rect.center.x - w / 2f
-                                val heroCy = rect.center.y - h / 2f
-                                translationX = lerp(heroCx, 0f, effectiveReveal)
-                                translationY = lerp(heroCy, 0f, effectiveReveal)
-                                alpha = (effectiveReveal / 0.25f).coerceIn(0f, 1f)
-                                transformOrigin = TransformOrigin.Center
-                            } else if (!reduceMotion) {
-                                translationX = (1f - effectiveReveal) * (w * 0.26f)
-                                val s = lerp(0.965f, 1f, effectiveReveal)
-                                scaleX = s
-                                scaleY = s
-                                alpha = (effectiveReveal / 0.30f).coerceIn(0f, 1f)
-                            }
-                        }
-                ) {
-                    RenderRoute(topDest)
-                }
+                        .zIndex(backStack.lastIndex - 0.5f)
+                        .graphicsLayer { alpha = effectiveReveal * 0.24f }
+                        .background(Color.Black)
+                )
             }
 
             // Dynamic-Island Apple Glass Status Toast
@@ -575,6 +614,7 @@ fun QraftRoot(
                 exit = AppMotion.toastExit,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
+                    .zIndex(100f)
                     .statusBarsPadding()
                     .padding(top = 12.dp, start = 20.dp, end = 20.dp)
             ) {

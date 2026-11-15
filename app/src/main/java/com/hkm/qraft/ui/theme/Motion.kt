@@ -37,6 +37,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -297,14 +298,16 @@ fun Modifier.appleEntrance(
 ): Modifier = composed {
     if (reduceMotion) return@composed this
 
-    var shown by remember { mutableStateOf(false) }
+    var shown by rememberSaveable { mutableStateOf(false) }
     val clampedStep = index.coerceIn(0, 5)
     // Subtle non-uniform organic cadence on first few cards
     val delayMs = (clampedStep * stepDelayMs) + (clampedStep * clampedStep * 3)
 
-    LaunchedEffect(Unit) {
-        if (delayMs > 0) delay(delayMs.toLong())
-        shown = true
+    LaunchedEffect(shown) {
+        if (!shown) {
+            if (delayMs > 0) delay(delayMs.toLong())
+            shown = true
+        }
     }
 
     val progress by animateFloatAsState(

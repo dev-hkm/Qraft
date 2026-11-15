@@ -834,4 +834,25 @@ class QraftVerificationTest {
         assertEquals(sampleRect, stored?.rect)
         assertEquals(24f, stored?.cornerRadiusDp)
     }
+
+    @Test
+    fun qraftRootPushAndPopBackNavigatesSmoothlyWithoutCrash() {
+        val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+        val vm = QraftViewModel(app)
+        composeRule.setContent {
+            com.hkm.qraft.ui.theme.QraftTheme(themeMode = ThemeMode.LIGHT) {
+                QraftRoot(viewModel = vm)
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Craft QR &", substring = true).assertIsDisplayed()
+
+        composeRule.onNodeWithContentDescription("Settings").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Creator Greeting Name", substring = true).assertIsDisplayed()
+
+        composeRule.onAllNodes(hasContentDescription("Back")).onFirst().performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Craft QR &", substring = true).assertIsDisplayed()
+    }
 }
